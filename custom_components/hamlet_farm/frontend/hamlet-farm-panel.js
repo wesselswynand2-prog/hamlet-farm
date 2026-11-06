@@ -1,0 +1,757 @@
+/* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
+import { TYPES, ROLES, SHAPES, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue } from "./hamlet-farm-map.js";
+
+const DOMAIN = "hamlet_farm";
+const BASE = new URL(".", import.meta.url).href;
+const CLS_LABEL = { run: "Running", on: "On", off: "Off", warn: "Attention", bad: "Fault", offline: "Offline", info: "" };
+const tstr = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+const dstr = (iso) => { if (!iso) return ""; const d = new Date(iso); return d.toDateString() === new Date().toDateString() ? tstr(iso)
+  : `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${tstr(iso)}`; };
+const fmtKwh = (v) => { v = num(v); return v === null ? "–" : `${v >= 100 ? Math.round(v) : v.toFixed(1)} kWh`; };
+const fmtN = (v, d = 1) => { v = num(v); return v === null ? "–" : (Math.round(v * 10 ** d) / 10 ** d).toLocaleString(); };
+
+const STYLE = `
+:host {
+  display: block; height: 100%;
+  background: var(--primary-background-color);
+  color: var(--primary-text-color);
+  font-family: var(--paper-font-body1_-_font-family, Roboto, system-ui, sans-serif);
+  --gap: 16px; --radius: var(--ha-card-border-radius, 12px);
+  --card: var(--card-background-color, #fff);
+  --muted: var(--secondary-text-color, #6b6b6b);
+  --line: var(--divider-color, rgba(127,127,127,.2));
+  --accent: var(--primary-color, #03a9f4);
+  --c-run: #1baf7a; --c-water: #2a78d6; --c-power: #eda100;
+  --c-ok: var(--success-color, #2e9e4f); --c-warn: var(--warning-color, #e08a00); --c-bad: var(--error-color, #db4437);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+.wrap { display: flex; flex-direction: column; height: 100vh; }
+.toolbar { display: flex; align-items: center; gap: 8px; height: var(--header-height, 56px); padding: 0 12px; flex: none;
+  background: var(--app-header-background-color, var(--primary-color)); color: var(--app-header-text-color, #fff);
+  border-bottom: var(--app-header-border-bottom, none); z-index: 2; }
+.toolbar .title { font-size: 20px; font-weight: 400; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 4px; overflow-x: auto; }
+.tabs button { background: transparent; border: 0; color: inherit; opacity: .7; padding: 8px 12px; font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: currentColor; }
+.tbtn { font: inherit; font-size: 14px; background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 999px; padding: 6px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.tbtn ha-icon { --mdc-icon-size: 18px; }
+.tbtn[aria-pressed="true"] { background: var(--app-header-text-color, #fff); color: var(--app-header-background-color, var(--primary-color)); }
+.body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+@media (max-width: 899px) { .wrap { height: auto; min-height: 100vh; } .body { grid-template-columns: 1fr; grid-template-rows: 58vh auto; } }
+.mapbox { position: relative; min-height: 300px; }
+.side { overflow-y: auto; padding: var(--gap); display: flex; flex-direction: column; gap: var(--gap); border-left: 1px solid var(--line); }
+@media (max-width: 899px) { .side { border-left: 0; overflow: visible; } }
+.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--ha-card-box-shadow, none);
+  border: 1px solid var(--ha-card-border-color, var(--line)); padding: 16px; min-width: 0; }
+h2 { font-size: 16px; font-weight: 500; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+h2 .sub { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.loading { padding: 64px; text-align: center; color: var(--muted); }
+
+/* map overlay controls */
+.ovl { position: absolute; z-index: 500; display: flex; gap: 6px; }
+.ovl.tr { top: 10px; right: 10px; flex-direction: column; align-items: flex-end; }
+.ovl.tl { top: 10px; left: 56px; right: 64px; }
+@media (max-width: 599px) { .ovl.tl { right: 10px; } .ovl.tr { top: 52px; } }
+.ovl.bl { bottom: 22px; left: 10px; right: 10px; justify-content: center; pointer-events: none; }
+.ovl.bl > * { pointer-events: auto; }
+.mseg { display: inline-flex; background: rgba(20,24,28,.82); border-radius: 10px; overflow: hidden; backdrop-filter: blur(4px); box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+.mseg button, .mbtn { font: inherit; font-size: 13px; padding: 7px 11px; border: 0; background: transparent; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.mseg button[aria-pressed="true"] { background: rgba(255,255,255,.22); }
+.mbtn { background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); backdrop-filter: blur(4px); }
+.mbtn ha-icon, .mseg ha-icon { --mdc-icon-size: 18px; }
+.search { display: flex; flex: 1; max-width: 360px; background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); overflow: hidden; }
+.search input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: #fff; background: transparent; border: 0; padding: 7px 10px; outline: none; }
+.search input::placeholder { color: rgba(255,255,255,.65); }
+.banner { background: rgba(20,24,28,.88); color: #fff; border-radius: 12px; padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  box-shadow: 0 2px 10px rgba(0,0,0,.45); max-width: 640px; }
+.banner b { font-weight: 500; }
+.banner .btn { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }
+.banner .btn.primary { background: var(--accent); border-color: var(--accent); }
+.toast { position: absolute; z-index: 600; left: 50%; top: 56px; transform: translateX(-50%); background: rgba(20,24,28,.9); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px; }
+
+/* summary */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .lab { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.tile .lab ha-icon { --mdc-icon-size: 18px; color: var(--ic, var(--muted)); }
+.tile .v { font-size: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .note { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--primary-text-color); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.chip ha-icon { --mdc-icon-size: 16px; }
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* point list */
+.list { display: flex; flex-direction: column; }
+.row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; font: inherit;
+  color: inherit; text-align: left; cursor: pointer; width: 100%; border-radius: 0; }
+.row:last-child { border-bottom: 0; }
+.row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.dot { width: 30px; height: 30px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; background: var(--mc); color: #fff; }
+.dot.info { color: #333; border: 1px solid var(--line); }
+.dot.offline { opacity: .7; }
+.dot ha-icon { --mdc-icon-size: 18px; }
+.row .nm { flex: 1; min-width: 0; }
+.row .nm div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.row .nm .st { font-size: 12px; color: var(--muted); }
+.row .nm .st.bad { color: var(--c-bad); } .row .nm .st.warn { color: var(--c-warn); }
+.row .val { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty { padding: 24px 0; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* details */
+.dhead { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dhead .dot { width: 44px; height: 44px; } .dhead .dot ha-icon { --mdc-icon-size: 26px; }
+.dhead .t { flex: 1; min-width: 0; } .dhead .t b { display: block; font-size: 18px; font-weight: 500; } .dhead .t span { font-size: 13px; color: var(--muted); }
+.iconbtn { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 50%; display: inline-flex; }
+.iconbtn:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 500;
+  background: color-mix(in srgb, var(--bc, var(--muted)) 14%, transparent); }
+.badge .bd { width: 8px; height: 8px; border-radius: 50%; background: var(--bc, var(--muted)); }
+.badge.pulse .bd { animation: pulse 1.6s ease-in-out infinite; } @keyframes pulse { 50% { opacity: .3; } }
+.reason { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.ctl { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 6px; margin-top: 14px; }
+.ctl button { font: inherit; font-size: 14px; padding: 10px 4px; border-radius: 10px; cursor: pointer; background: transparent; color: var(--primary-text-color);
+  border: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ctl button ha-icon { --mdc-icon-size: 22px; }
+.ctl button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--text-primary-color, #fff); }
+.ctl button.confirm { border-color: var(--c-warn); color: var(--c-warn); }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.kv:last-child { border-bottom: 0; } .kv span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+.kv button { font: inherit; font-size: 13px; }
+.cam { width: 100%; border-radius: 8px; display: block; margin-top: 8px; background: #000; aspect-ratio: 16/9; object-fit: cover; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.btn { font: inherit; font-size: 14px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--primary-text-color); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.btn ha-icon { --mdc-icon-size: 18px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--text-primary-color, #fff); }
+.btn.danger { color: var(--c-bad); border-color: color-mix(in srgb, var(--c-bad) 50%, transparent); }
+.btn:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* events */
+.ev { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ev:last-child { border-bottom: 0; }
+.ev i { width: 12px; height: 12px; border-radius: 3px; flex: none; margin-top: 4px; }
+.ev .when { font-size: 12px; color: var(--muted); }
+
+/* forms */
+.form { display: grid; gap: 2px; }
+.field { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.field.inline { flex-direction: row; align-items: center; justify-content: space-between; }
+.field label { font-size: 14px; } .field .hint { font-size: 12px; color: var(--muted); }
+input[type=number], input[type=text], select, textarea { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--secondary-background-color, transparent); color: var(--primary-text-color); color-scheme: inherit; width: 100%; }
+input[type=number] { width: 100px; } textarea { resize: vertical; min-height: 60px; }
+.ent { display: flex; gap: 6px; align-items: center; } .ent input { flex: 1; } .ent .now { font-size: 12px; color: var(--muted); white-space: nowrap; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.ent .now.bad { color: var(--c-bad); }
+details summary { cursor: pointer; font-size: 14px; color: var(--accent); padding: 10px 0 4px; }
+.switch { position: relative; width: 40px; height: 22px; flex: none; display: inline-block; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--line); cursor: pointer; transition: background .2s; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.switch input:checked + span { background: var(--accent); } .switch input:checked + span::after { transform: translateX(18px); }
+.err { color: var(--c-bad); font-size: 13px; margin-top: 8px; }
+.typegrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.typegrid button { font: inherit; font-size: 12px; padding: 8px 2px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--primary-text-color);
+  cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.typegrid button ha-icon { --mdc-icon-size: 20px; }
+.typegrid button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+`;
+
+const ICON = (t) => TYPES[t]?.icon || "mdi:map-marker";
+
+class HamletFarmPanel extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._entries = []; this._entryId = null; this._snap = null; this._sel = null; this._edit = false;
+    this._draft = null; this._draw = null; this._filter = "all"; this._labels = true; this._unsub = null; this._confirm = null;
+    this._pumps = []; this._isAdmin = false; this._baseOverride = null;
+  }
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (this._menuBtn) this._menuBtn.hass = hass;
+    if (first) this._init();
+    else if (this._snap && this._sel && !this._draft) this._renderSide();   // live entity values in the details card
+  }
+  get hass() { return this._hass; }
+  set narrow(v) { this._narrow = v; if (this._menuBtn) this._menuBtn.narrow = v; }
+  set panel(v) { this._panel = v; }
+  set route(v) { this._route = v; }
+
+  connectedCallback() { if (this._hass && !this._unsub && this._entryId) this._subscribe(); }
+  disconnectedCallback() { this._unsubscribe(); }
+  $(id) { return this.shadowRoot.getElementById(id); }
+  _setHTML(el, html) { if (!el || el._html === html) return; el._html = html; el.innerHTML = html; }
+
+  async _init() {
+    const root = this.shadowRoot;
+    root.innerHTML = `<style>${STYLE}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
+      <div class="wrap">
+        <div class="toolbar"><span id="menu"></span><div class="title">Farm map</div><div class="tabs" role="tablist"></div>
+          <button class="tbtn" id="editbtn" data-act="edit" hidden aria-pressed="false"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button></div>
+        <div class="body">
+          <div class="mapbox">
+            <div class="hf-map" id="map"></div>
+            <div class="ovl tl"><form class="search" id="search"><input id="q" type="text" placeholder="Go to place or GPS: -25.75, 28.19" aria-label="Search place or coordinates"><button class="mbtn" type="submit" aria-label="Search"><ha-icon icon="mdi:magnify"></ha-icon></button></form></div>
+            <div class="ovl tr">
+              <div class="mseg" id="base"></div>
+              <button class="mbtn" data-act="fit" title="Show the whole farm"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button>
+              <button class="mbtn" data-act="labels" title="Names on / off"><ha-icon icon="mdi:label-outline"></ha-icon></button>
+              <button class="mbtn" data-act="locate" title="My location"><ha-icon icon="mdi:crosshairs-gps"></ha-icon></button>
+            </div>
+            <div class="ovl bl" id="banner"></div>
+            <div class="toast" id="toast" hidden></div>
+          </div>
+          <div class="side" id="side"><div class="card loading">Loading…</div></div>
+        </div>
+      </div>`;
+    const mb = document.createElement("ha-menu-button");
+    mb.hass = this._hass; mb.narrow = this._narrow;
+    root.getElementById("menu").appendChild(mb);
+    this._menuBtn = mb;
+    root.addEventListener("click", (ev) => this._click(ev));
+    root.addEventListener("input", (ev) => this._input(ev));
+    root.addEventListener("change", (ev) => this._input(ev));
+    root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._search(); });
+    try {
+      this._entries = await this._hass.callWS({ type: `${DOMAIN}/list` });
+    } catch (e) {
+      this.$("side").innerHTML = `<div class="card loading">Could not reach the farm integration: ${esc(e.message)}</div>`;
+      return;
+    }
+    if (!this._entries.length) {
+      this.$("side").innerHTML = `<div class="card loading">No farm set up yet. Go to Settings → Devices &amp; services → Add integration → Hamlet Farm.</div>`;
+      return;
+    }
+    let L;
+    try { L = await loadLeaflet(); } catch (e) { this.$("side").innerHTML = `<div class="card loading">${esc(e.message)}</div>`; return; }
+    this._fm = new FarmMap(L, this.$("map"), {
+      onSelect: (id) => this._select(id),
+      onMove: (id, lat, lng) => this._move(id, lat, lng),
+      onMapClick: (ll) => this._mapClick(ll),
+      onShapeClick: (id) => this._shapeClick(id),
+    });
+    let saved = null;
+    try { saved = localStorage.getItem("hamlet_farm_entry"); this._labels = localStorage.getItem("hamlet_farm_labels") !== "0"; this._baseOverride = localStorage.getItem("hamlet_farm_base"); } catch (e) { /* storage blocked */ }
+    this._fm.setLabels(this._labels);
+    await this._selectFarm(this._entries.some((e) => e.entry_id === saved) ? saved : this._entries[0].entry_id);
+    const want = new URLSearchParams(location.search).get("point");
+    if (want && this._point(want)) { this._select(want); this._fm.flyTo(this._point(want)); }
+  }
+
+  _renderTabs() {
+    this._setHTML(this.shadowRoot.querySelector(".tabs"), this._entries.length < 2 ? "" : this._entries.map((e) =>
+      `<button role="tab" data-tab="${esc(e.entry_id)}" aria-selected="${e.entry_id === this._entryId}">${esc(e.name)}</button>`).join(""));
+  }
+
+  async _selectFarm(id) {
+    this._unsubscribe();
+    this._entryId = id;
+    try { localStorage.setItem("hamlet_farm_entry", id); } catch (e) { /* ignore */ }
+    this._renderTabs();
+    Object.assign(this, { _snap: null, _sel: null, _draft: null, _draw: null, _first: true });
+    try {
+      const s = await this._hass.callWS({ type: `${DOMAIN}/state`, entry_id: id });
+      this._isAdmin = s.is_admin; this._pumps = s.pumps || [];
+      this.$("editbtn").hidden = !this._isAdmin;
+      this._apply(s);
+    } catch (e) { this.$("side").innerHTML = `<div class="card loading">${esc(e.message)}</div>`; return; }
+    this._subscribe();
+  }
+  async _subscribe() {
+    if (!this._entryId || this._unsub) return;
+    try {
+      this._unsub = await this._hass.connection.subscribeMessage((s) => this._apply(s), { type: `${DOMAIN}/subscribe`, entry_id: this._entryId });
+    } catch (e) { console.warn("hamlet_farm subscribe failed", e); }
+  }
+  _unsubscribe() { if (this._unsub) { this._unsub(); this._unsub = null; } }
+
+  _apply(s) {
+    if (s.entry_id !== this._entryId) return;
+    this._snap = s;
+    this.shadowRoot.querySelector(".toolbar .title").textContent = this._entries.length > 1 ? "Farm map" : s.name;
+    const base = this._baseOverride || s.settings?.base || "satellite";
+    this._fm.setBase(base);
+    this._renderBase(base);
+    this._fm.update(this._mapSnap());
+    if (this._first) { this._first = false; this._fm.setView(s.view, s.points, s.shapes, { lat: this._hass.config?.latitude, lng: this._hass.config?.longitude }); }
+    if (this._sel && !this._point(this._sel)) this._sel = null;
+    this._fm.setSelected(this._sel);
+    if (!this._draft && !this._typing()) this._renderSide();
+    this._renderBanner();
+  }
+
+  /** Snapshot for the map, with a new (not yet saved) point shown too. */
+  _mapSnap() {
+    const s = this._snap; const d = this._draft;
+    if (!d || d.kind !== "point" || this._point(d.id)) return s;
+    return { ...s, points: [...s.points, { ...d, name: d.name || "New point" }] };
+  }
+  _typing() { const a = this.shadowRoot.activeElement; return !!(a && a.closest && a.closest("#settings, #editor")); }
+
+  _point(id) { return this._snap?.points.find((p) => p.id === id); }
+  _st(id) { return this._snap?.statuses?.[id] || {}; }
+
+  _renderBase(base) {
+    const b = (k, l) => `<button data-base="${k}" aria-pressed="${base === k}">${l}</button>`;
+    this._setHTML(this.$("base"), b("satellite", "Satellite") + b("hybrid", "Hybrid") + b("map", "Map"));
+  }
+
+  _toast(msg) {
+    const t = this.$("toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(this._tt); this._tt = setTimeout(() => { t.hidden = true; }, 3500);
+  }
+
+  /* ------------------------------------------------------------ banner (edit mode) */
+  _renderBanner() {
+    let html = "";
+    if (this._draw) {
+      const d = SHAPES[this._draw.kind];
+      const n = this._draw.coords.length; const need = this._draw.kind === "field" ? 3 : 2;
+      html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing <b>${esc(d.label.toLowerCase())}</b> – tap the map to add points (${n})</span>
+        <button class="btn" data-act="drawundo" ${n ? "" : "disabled"}>Undo</button><button class="btn" data-act="drawcancel">Cancel</button>
+        <button class="btn primary" data-act="drawdone" ${n >= need ? "" : "disabled"}>Finish</button></div>`;
+    } else if (this._placing) {
+      html = `<div class="banner"><ha-icon icon="mdi:map-marker-plus"></ha-icon><span>Tap the map where the new point goes</span>
+        <button class="btn" data-act="gpsplace"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>Where I stand</button><button class="btn" data-act="placecancel">Cancel</button></div>`;
+    } else if (this._edit) {
+      html = `<div class="banner"><ha-icon icon="mdi:pencil"></ha-icon><span><b>Editing</b> – drag to move, tap to change</span>
+        <button class="btn primary" data-act="addpoint"><ha-icon icon="mdi:map-marker-plus"></ha-icon>Point</button>
+        <button class="btn" data-act="addline"><ha-icon icon="mdi:vector-polyline"></ha-icon>Line / land</button>
+        <button class="btn" data-act="saveview" title="Open the map here next time"><ha-icon icon="mdi:crop-free"></ha-icon>Start view</button>
+        <button class="btn" data-act="edit">Done</button></div>`;
+    }
+    this._setHTML(this.$("banner"), html);
+    this._fm?.setEditing(this._edit);
+  }
+
+  /* ------------------------------------------------------------ side panel */
+  _renderSide() {
+    if (!this._snap) return;
+    if (this._draft) return this._renderEditor();
+    if (this._sel) return this._renderDetails();
+    this._renderOverview();
+  }
+
+  _renderOverview() {
+    const s = this._snap; const sm = s.summary || {};
+    const pts = s.points || [];
+    const types = [...new Set(pts.map((p) => p.type))];
+    const filt = this._filter;
+    let shown = pts.filter((p) => filt === "all" || (filt === "alerts" ? this._st(p.id).alert : p.type === filt));
+    const rank = { bad: 0, offline: 1, warn: 2, run: 3, on: 4, off: 5, info: 6 };
+    shown = shown.sort((a, b) => (rank[this._st(a.id).cls] ?? 9) - (rank[this._st(b.id).cls] ?? 9) || a.name.localeCompare(b.name));
+    const tile = (icon, color, label, v, note) => `<div class="tile"><span class="lab" style="--ic:${color}"><ha-icon icon="${icon}"></ha-icon>${label}</span><span class="v">${v}</span>${note ? `<span class="note">${note}</span>` : ""}</div>`;
+    const chip = (k, label, icon) => `<button class="chip" data-filter="${k}" aria-pressed="${filt === k}">${icon ? `<ha-icon icon="${icon}"></ha-icon>` : ""}${label}</button>`;
+    const evs = (s.events || []).slice(0, 6);
+    const ss = s.settings || {};
+    this._setHTML(this.$("side"), `
+      <section class="card">
+        <h2>${esc(s.name)}<span class="sub">${sm.total || 0} points</span></h2>
+        <div class="tiles">
+          ${tile("mdi:play-circle-outline", "var(--c-run)", "Running", sm.running ?? 0, "")}
+          ${tile("mdi:alert-outline", sm.alerts ? "var(--c-bad)" : "var(--muted)", "Alerts", sm.alerts ?? 0, sm.alerts ? esc(sm.alert_names.slice(0, 2).join(", ")) : "all OK")}
+          ${sm.grid_w !== null && sm.grid_w !== undefined ? tile("mdi:transmission-tower", "var(--c-power)", "Eskom now", fmtW(sm.grid_w), "") : ""}
+          ${sm.grid_kwh_today !== null && sm.grid_kwh_today !== undefined ? tile("mdi:lightning-bolt", "var(--c-power)", "Eskom today", fmtKwh(sm.grid_kwh_today), "") : ""}
+        </div>
+      </section>
+      <section class="card">
+        <h2>Points</h2>
+        ${pts.length ? `<div class="chips" style="margin-bottom:8px">${chip("all", "All")}${sm.alerts ? chip("alerts", `Alerts (${sm.alerts})`, "mdi:alert-outline") : ""}${types.map((t) => chip(t, TYPES[t]?.label || t, ICON(t))).join("")}</div>` : ""}
+        <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._isAdmin ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is." : "No points on the map yet."}</div>`}</div>
+      </section>
+      ${evs.length ? `<section class="card"><h2>Alerts<span class="sub">last ${evs.length}</span></h2>
+        ${evs.map((e) => `<div class="ev"><i style="background:${e.cls === "ok" ? "var(--c-ok)" : e.cls === "warn" ? "var(--c-warn)" : e.cls === "offline" ? "#8a8f96" : "var(--c-bad)"}"></i>
+          <div><b style="font-weight:500">${esc(e.name)}</b>: ${esc(e.text)}<div class="when">${dstr(e.t)}</div></div></div>`).join("")}
+        ${ss.notify_service ? `<div class="small muted" style="margin-top:8px">Alerts are also sent to ${esc(ss.notify_service)}</div>` : ""}</section>` : ""}
+      ${this._isAdmin ? `<section class="card" id="settings"><h2>Alert settings<span class="sub">admin only</span></h2>
+        <div class="form">
+          <div class="field"><label for="s_notify">Send alerts to</label><span class="hint">e.g. notify.mobile_app_wynand – blank = Home Assistant notifications only</span>
+            <input type="text" id="s_notify" value="${esc(ss.notify_service || "")}" list="dl-notify" placeholder="notify.mobile_app_…"></div>
+          <div class="field inline"><label for="s_delay">Alert after<span class="hint" style="display:block">Waits this long so a short blip doesn't alert</span></label>
+            <span class="small muted"><input type="number" id="s_delay" min="0" max="3600" value="${esc(ss.alert_delay_s ?? 120)}"> s</span></div>
+          <div class="field inline"><label for="s_base">Map style for everyone</label>
+            <select id="s_base" style="width:auto">${["satellite", "hybrid", "map"].map((b) => `<option value="${b}" ${ss.base === b ? "selected" : ""}>${b[0].toUpperCase() + b.slice(1)}</option>`).join("")}</select></div>
+        </div>
+        <datalist id="dl-notify">${Object.keys(this._hass.services?.notify || {}).map((k) => `<option value="notify.${esc(k)}"></option>`).join("")}</datalist>
+        <div class="actions"><button class="btn primary" data-act="savesettings">Save</button></div><div class="err" id="serr"></div></section>` : ""}`);
+  }
+
+  _rowHtml(p) {
+    const st = this._st(p.id); const cls = st.cls || "info";
+    const val = shortValue(p, st);
+    return `<button class="row" data-pt="${esc(p.id)}"><span class="dot ${cls}" style="--mc:${clsColor(cls, p.type)}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
+      <span class="nm"><div>${esc(p.name)}</div><div class="st ${cls}">${esc(st.status || TYPES[p.type]?.label || "")}</div></span><span class="val">${esc(val)}</span></button>`;
+  }
+
+  _renderDetails() {
+    const p = this._point(this._sel); if (!p) return;
+    const st = this._st(p.id); const v = st.values || {}; const cls = st.cls || "info";
+    const color = clsColor(cls, p.type);
+    const ent = p.entities || {};
+    const H = this._hass;
+    const rows = [];
+    const kv = (k, val) => rows.push(`<div class="kv"><span class="muted">${k}</span><span>${val}</span></div>`);
+    if (v.power_w !== undefined) kv("Power", fmtW(v.power_w));
+    if (v.energy_today_kwh !== undefined) kv("Energy today", fmtKwh(v.energy_today_kwh));
+    if (v.voltage !== undefined) kv("Voltage", `${v.voltage} V`);
+    if (v.level !== undefined) kv("Level", `${fmtN(v.level, 0)}%`);
+    if (v.pressure !== undefined) kv("Pressure", `${fmtN(v.pressure, 2)} ${esc(v.pressure_unit || "")}`);
+    if (v.flow !== undefined) kv("Flow", `${fmtN(v.flow, 1)} ${esc(v.flow_unit || "")}`);
+    if (v.angle !== undefined) kv("Pivot position", `${fmtN(v.angle, 0)}°`);
+    if (p.type === "pivot" && p.radius) kv("Pivot size", `${p.radius} m radius · ≈ ${fmtN((Math.PI * p.radius * p.radius) / 10000, 1)} ha`);
+    const cams = [];
+    for (const e of p.extra || []) {
+      const so = H.states[e];
+      const name = esc(so?.attributes?.friendly_name || e);
+      if (e.startsWith("camera.")) { if (so?.attributes?.entity_picture) cams.push(`<img class="cam" alt="${name}" src="${esc(so.attributes.entity_picture)}&t=${Math.floor(Date.now() / 10000)}">`); continue; }
+      const dom = e.split(".")[0];
+      const val = so ? `${esc(H.formatEntityState ? H.formatEntityState(so) : `${so.state} ${so.attributes.unit_of_measurement || ""}`)}` : `<span class="muted">not found</span>`;
+      const tog = ["switch", "input_boolean", "light"].includes(dom) && so ? ` <button class="btn" style="padding:2px 10px" data-toggle="${esc(e)}">${so.state === "on" ? "Turn off" : "Turn on"}</button>` : "";
+      rows.push(`<div class="kv"><span class="muted">${name}</span><span>${val}${tog}</span></div>`);
+    }
+    // controls
+    let ctl = "";
+    if (p.pump_entry && v.pump_mode !== undefined) {
+      const m = v.pump_mode;
+      const mb = (k, icon, l) => `<button data-pmode="${k}" aria-pressed="${m === k}"><ha-icon icon="${icon}"></ha-icon>${l}</button>`;
+      ctl = `<div class="ctl">${mb("auto", "mdi:auto-mode", "Auto")}${mb("run", "mdi:timer-play-outline", "Run 30m")}${mb("on", "mdi:power", "On")}${mb("off", "mdi:power-off", "Off")}</div>`;
+    } else if (ent.control) {
+      const dom = ent.control.split(".")[0];
+      const so = H.states[ent.control];
+      const isOn = so && ["on", "open", "opening"].includes(so.state);
+      const [onL, offL, onI, offI] = dom === "cover" || dom === "valve" || p.type === "gate" || p.type === "valve"
+        ? ["Open", "Close", "mdi:gate-open", "mdi:gate"] : ["On", "Off", "mdi:power", "mdi:power-off"];
+      const b = (k, icon, l, pressed) => {
+        const conf = this._confirm === `${p.id}:${k}`;
+        return `<button data-ctl="${k}" aria-pressed="${pressed}" class="${conf ? "confirm" : ""}"><ha-icon icon="${icon}"></ha-icon>${conf ? `Tap again` : l}</button>`;
+      };
+      ctl = `<div class="ctl">${b("on", onI, onL, !!isOn)}${b("off", offI, offL, so ? !isOn : false)}</div>
+        ${so ? "" : `<div class="err">${esc(ent.control)} not found</div>`}`;
+    }
+    const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+    this._setHTML(this.$("side"), `
+      <section class="card">
+        <div class="dhead"><span class="dot ${cls}" style="--mc:${color}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
+          <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
+          <button class="iconbtn" data-act="close" aria-label="Back to the list"><ha-icon icon="mdi:close"></ha-icon></button></div>
+        ${st.status ? `<span class="badge ${st.running ? "pulse" : ""}" style="--bc:${cls === "info" ? "var(--muted)" : color}"><span class="bd"></span>${esc(st.status)}</span>` : ""}
+        ${v.pump_reason ? `<div class="reason">${esc(v.pump_reason)}</div>` : ""}
+        ${ctl}
+        ${rows.length ? `<div style="margin-top:14px">${rows.join("")}</div>` : ""}
+        ${cams.join("")}
+        ${p.notes ? `<p class="small" style="white-space:pre-wrap;margin:12px 0 0">${esc(p.notes)}</p>` : ""}
+        <div class="actions">
+          <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
+          ${p.pump_entry ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pump page</button>` : ""}
+          ${this._isAdmin ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}
+        </div>
+        <div class="small muted" style="margin-top:10px">GPS ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</div>
+      </section>`);
+  }
+
+  /* ------------------------------------------------------------ editor */
+  _renderEditor() {
+    const d = this._draft;
+    if (d.kind === "shape") return this._renderShapeEditor();
+    const t = TYPES[d.type] || TYPES.other;
+    const H = this._hass;
+    const roleField = (k) => {
+      const r = ROLES[k]; const val = d.entities[k] || "";
+      const so = val ? H.states[val] : null;
+      const now = val ? (so ? `${so.state}${so.attributes.unit_of_measurement ? " " + so.attributes.unit_of_measurement : ""}` : "not found") : "";
+      return `<div class="field"><label for="e_${k}">${r.label}</label>${r.hint ? `<span class="hint">${r.hint}</span>` : ""}
+        <div class="ent"><input type="text" id="e_${k}" data-role="${k}" value="${esc(val)}" list="dl-${k}" placeholder="${r.domains[0]}.…" autocomplete="off" spellcheck="false">
+        <span class="now ${so || !val ? "" : "bad"}" title="${esc(now)}">${esc(now)}</span></div></div>`;
+    };
+    const main = d.pump_entry ? [] : t.roles;
+    const others = Object.keys(ROLES).filter((k) => !main.includes(k));
+    const lists = Object.keys(ROLES).map((k) => `<datalist id="dl-${k}">${this._entityOptions(ROLES[k].domains)}</datalist>`).join("")
+      + `<datalist id="dl-extra">${this._entityOptions(null)}</datalist>`;
+    const isNew = !this._point(d.id);
+    this._setHTML(this.$("side"), `
+      <section class="card" id="editor">
+        <h2>${isNew ? "New point" : "Edit point"}<span class="sub"><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <div class="typegrid">${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" aria-pressed="${d.type === k}"><ha-icon icon="${v.icon}"></ha-icon>${v.label}</button>`).join("")}</div>
+        <div class="form" style="margin-top:8px">
+          <div class="field"><label for="f_name">Name</label><input type="text" id="f_name" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(t.label)}"></div>
+          ${["pump", "booster", "other"].includes(d.type) && this._pumps.length ? `<div class="field"><label for="f_pump">Hamlet Pump</label><span class="hint">Link a pump from the Pumps page – status, protection and modes come from there</span>
+            <select id="f_pump" data-f="pump_entry"><option value="">– not linked –</option>${this._pumps.map((pp) => `<option value="${esc(pp.entry_id)}" ${d.pump_entry === pp.entry_id ? "selected" : ""}>${esc(pp.name)}</option>`).join("")}</select></div>` : ""}
+          ${d.type === "pivot" ? `<div class="field inline"><label for="f_radius">Pivot radius<span class="hint" style="display:block">Centre to the last tower – draws the circle</span></label><span class="small muted"><input type="number" id="f_radius" data-f="radius" min="0" max="3000" value="${esc(d.radius)}"> m</span></div>` : ""}
+          ${main.map(roleField).join("")}
+        </div>
+        <details ${d.pump_entry || main.length === 0 ? "open" : ""}><summary>${d.pump_entry ? "Extra sensors" : "More sensors"}</summary><div class="form">${others.map(roleField).join("")}</div></details>
+        <div class="form">
+          <div class="field"><label for="f_extra">Also show</label><span class="hint">Any other entities, one per line – cameras show a picture, switches get a button</span>
+            <textarea id="f_extra" data-f="extra" rows="2" spellcheck="false" placeholder="camera.borehole&#10;sensor.dam_temperature">${esc(d.extra.join("\n"))}</textarea>
+            <input type="text" id="f_extra_add" list="dl-extra" placeholder="Search to add…" autocomplete="off"></div>
+          ${["tank", "pump", "other"].includes(d.type) || d.entities.level ? `<div class="field inline"><label for="f_low">Low level alert below</label><span class="small muted"><input type="number" id="f_low" data-f="low_level" min="0" max="100" value="${esc(d.low_level)}"> %</span></div>` : ""}
+          <div class="field inline"><label for="f_alert">Alert when this point has a problem<span class="hint" style="display:block">Fault, no power, offline, low level</span></label>
+            <label class="switch"><input type="checkbox" id="f_alert" data-f="alert" ${d.alert ? "checked" : ""}><span></span></label></div>
+          <div class="field"><label for="f_notes">Notes</label><textarea id="f_notes" data-f="notes" maxlength="500" placeholder="e.g. 7.5 kW submersible, 80 m deep. Key at the farm office.">${esc(d.notes)}</textarea></div>
+          <div class="field inline"><span class="small muted">GPS ${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}</span><span class="small muted">drag on the map to move</span></div>
+        </div>
+        ${lists}
+        <div class="actions">
+          <button class="btn primary" data-act="savepoint">Save</button>
+          <button class="btn" data-act="canceledit">Cancel</button>
+          ${isNew ? "" : `<button class="btn danger" data-act="deletepoint" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
+        </div>
+        <div class="err" id="ferr"></div>
+      </section>`);
+  }
+
+  _renderShapeEditor() {
+    const d = this._draft; const isNew = !this._snap.shapes.some((s) => s.id === d.id);
+    this._setHTML(this.$("side"), `
+      <section class="card" id="editor">
+        <h2>${isNew ? "New line" : "Edit line"}<span class="sub"><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <div class="chips">${Object.entries(SHAPES).map(([k, s]) => `<button class="chip" data-skind="${k}" aria-pressed="${d.shape_kind === k}"><i style="width:14px;height:4px;border-radius:2px;background:${s.color};display:inline-block;outline:1px solid rgba(0,0,0,.3)"></i>${s.label}</button>`).join("")}</div>
+        <div class="form" style="margin-top:8px">
+          <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
+          <div class="field inline"><span class="small muted">${d.coords.length} points${d.shape_kind === "field" ? ` · ≈ ${fmtN(this._area(d.coords) / 10000, 1)} ha` : ` · ≈ ${fmtN(this._length(d.coords), 0)} m`}</span></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" data-act="saveshape">Save</button>
+          <button class="btn" data-act="canceledit">Cancel</button>
+          ${isNew ? "" : `<button class="btn danger" data-act="deleteshape" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
+        </div>
+        <div class="err" id="ferr"></div>
+      </section>`);
+  }
+
+  _entityOptions(domains) {
+    const key = (domains || ["*"]).join(",");
+    this._optCache = this._optCache || {};
+    const n = Object.keys(this._hass.states).length;
+    if (this._optCache[key]?.n === n) return this._optCache[key].html;
+    const html = Object.values(this._hass.states)
+      .filter((s) => !domains || domains.includes(s.entity_id.split(".")[0]))
+      .sort((a, b) => a.entity_id.localeCompare(b.entity_id))
+      .map((s) => `<option value="${esc(s.entity_id)}">${esc(s.attributes.friendly_name || "")}</option>`).join("");
+    this._optCache[key] = { n, html };
+    return html;
+  }
+
+  _length(c) { let m = 0; for (let i = 1; i < c.length; i++) m += this._fm.map.distance(c[i - 1], c[i]); return m; }
+  _area(c) {   // spherical polygon area, m²
+    const R = 6378137; let a = 0;
+    for (let i = 0; i < c.length; i++) { const [la1, lo1] = c[i]; const [la2, lo2] = c[(i + 1) % c.length];
+      a += ((lo2 - lo1) * Math.PI / 180) * (2 + Math.sin(la1 * Math.PI / 180) + Math.sin(la2 * Math.PI / 180)); }
+    return Math.abs((a * R * R) / 2);
+  }
+
+  /* ------------------------------------------------------------ events */
+  _select(id) {
+    if (this._draw || this._placing) return;
+    if (this._edit && this._isAdmin) { this._openEditor(id); return; }
+    this._sel = id; this._confirm = null; this._draft = null;
+    this._fm.setSelected(id);
+    this._renderSide();
+    if (this._narrow || innerWidth < 900) this.$("side").scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
+  _openEditor(id) {
+    const p = this._point(id); if (!p) return;
+    this._sel = id; this._fm.setSelected(id); this._confirm = null;
+    this._draft = { ...JSON.parse(JSON.stringify(p)), kind: "point" };
+    this._renderSide();
+  }
+
+  _newPoint(lat, lng) {
+    this._placing = false;
+    const id = Math.random().toString(16).slice(2, 10);
+    this._draft = { kind: "point", id, name: "", type: "pump", lat, lng, entities: {}, extra: [], pump_entry: null, radius: 400, low_level: 20, alert: true, notes: "" };
+    this._sel = null; this._fm.setSelected(null);
+    this._renderBanner(); this._renderSide();
+    this._fm.update(this._mapSnap());   // show the new point on the map straight away
+  }
+
+  async _move(id, lat, lng) {
+    if (this._draft?.id === id) { this._draft.lat = lat; this._draft.lng = lng; this._renderSide(); if (!this._point(id)) return; }
+    const p = this._point(id); if (!p) return;
+    try { await this._ws("save_point", { point: { ...p, lat, lng } }); this._toast(`${p.name} moved`); } catch (e) { this._toast(e.message); this._fm.update(this._mapSnap()); }
+  }
+
+  _mapClick(ll) {
+    if (this._draw) { this._draw.coords.push([ll.lat, ll.lng]); this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
+    if (this._placing) { this._newPoint(ll.lat, ll.lng); return; }
+    if (this._draft || !this._sel) return;
+    this._sel = null; this._fm.setSelected(null); this._renderSide();
+  }
+
+  _shapeClick(id) {
+    if (!this._edit || this._draw || this._placing) return;
+    const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
+    this._confirm = null;
+    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords };
+    this._renderSide();
+  }
+
+  async _ws(type, extra) {
+    const res = await this._hass.callWS({ type: `${DOMAIN}/${type}`, entry_id: this._entryId, ...extra });
+    this._apply(res);
+    return res.result;
+  }
+
+  _gps() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) { reject(new Error("This browser can't give a location")); return; }
+      navigator.geolocation.getCurrentPosition((pos) => resolve(pos.coords), (err) => reject(new Error(err.code === 1 ? "Location permission denied (needs https, e.g. Nabu Casa)" : "Could not get your location")),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+    });
+  }
+
+  async _search() {
+    const q = this.$("q").value.trim(); if (!q) return;
+    const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (m) { this._fm.map.flyTo([Number(m[1]), Number(m[2])], 17); return; }
+    const hit = this._snap.points.find((p) => p.name.toLowerCase().includes(q.toLowerCase()));
+    if (hit) { this._fm.flyTo(hit); this._select(hit.id); return; }
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+      const j = await r.json();
+      if (j[0]) this._fm.map.flyTo([Number(j[0].lat), Number(j[0].lon)], 15); else this._toast("Not found");
+    } catch (e) { this._toast("Search needs internet"); }
+  }
+
+  _readForm() {
+    const d = this._draft; const root = this.shadowRoot;
+    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; return; }
+    root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
+    root.querySelectorAll("[data-f]").forEach((el) => {
+      const f = el.dataset.f;
+      if (f === "alert") d.alert = el.checked;
+      else if (f === "extra") d.extra = el.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+      else if (f === "radius" || f === "low_level") d[f] = Number(el.value) || 0;
+      else if (f === "pump_entry") d.pump_entry = el.value || null;
+      else d[f] = el.value;
+    });
+  }
+
+  _input(ev) {
+    const el = ev.composedPath()[0];
+    if (!this._draft || !el?.id) return;
+    if (el.id === "f_extra_add" && ev.type === "change" && el.value.trim()) {
+      const ta = this.$("f_extra"); ta.value = (ta.value.trim() ? ta.value.trim() + "\n" : "") + el.value.trim(); el.value = "";
+    }
+    if (ev.type === "change" && (el.dataset.role || el.id === "f_pump")) { this._readForm(); this._setHTML(this.$("side"), ""); this._renderSide(); }
+  }
+
+  async _click(ev) {
+    const path = ev.composedPath();
+    const t = path.find((e) => e instanceof HTMLElement && (e.dataset?.act || e.dataset?.tab || e.dataset?.pt || e.dataset?.filter || e.dataset?.base
+      || e.dataset?.ctl || e.dataset?.pmode || e.dataset?.type || e.dataset?.skind || e.dataset?.toggle));
+    if (!t) return;
+    const ds = t.dataset;
+    if (ds.tab) { if (ds.tab !== this._entryId) this._selectFarm(ds.tab); return; }
+    if (ds.pt) { const p = this._point(ds.pt); this._select(ds.pt); if (p) this._fm.flyTo(p); return; }
+    if (ds.filter) { this._filter = ds.filter; this._renderSide(); return; }
+    if (ds.base) {
+      this._baseOverride = ds.base; try { localStorage.setItem("hamlet_farm_base", ds.base); } catch (e) { /* ignore */ }
+      this._fm.setBase(ds.base); this._renderBase(ds.base); return;
+    }
+    if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
+    if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.toggle) { this._hass.callService("homeassistant", "toggle", { entity_id: ds.toggle }); return; }
+    if (ds.pmode) {
+      const p = this._point(this._sel);
+      try { await this._hass.callWS({ type: "hamlet_pump/set_mode", entry_id: p.pump_entry, mode: ds.pmode, ...(ds.pmode === "run" ? { minutes: 30 } : {}) }); }
+      catch (e) { this._toast(e.message); }
+      return;
+    }
+    if (ds.ctl) {
+      const p = this._point(this._sel); const key = `${p.id}:${ds.ctl}`;
+      if (this._confirm !== key) { this._confirm = key; this._renderSide(); clearTimeout(this._ct); this._ct = setTimeout(() => { this._confirm = null; this._renderSide(); }, 4000); return; }
+      this._confirm = null;
+      const e = p.entities.control; const dom = e.split(".")[0]; const on = ds.ctl === "on";
+      const [svcDom, svc] = dom === "cover" ? ["cover", on ? "open_cover" : "close_cover"] : dom === "valve" ? ["valve", on ? "open_valve" : "close_valve"] : ["homeassistant", on ? "turn_on" : "turn_off"];
+      try { await this._hass.callService(svcDom, svc, { entity_id: e }); this._toast(`${p.name}: ${on ? "on" : "off"} sent`); } catch (err) { this._toast(err.message); }
+      this._renderSide();
+      return;
+    }
+    switch (ds.act) {
+      case "fit": this._fm.fit(this._snap?.points || [], this._snap?.shapes || []); break;
+      case "labels": this._labels = !this._labels; this._fm.setLabels(this._labels); try { localStorage.setItem("hamlet_farm_labels", this._labels ? "1" : "0"); } catch (e) { /* ignore */ } break;
+      case "locate":
+        try { const c = await this._gps(); this._fm.map.flyTo([c.latitude, c.longitude], 18); this._showMe(c); } catch (e) { this._toast(e.message); }
+        break;
+      case "edit":
+        this._edit = !this._edit; this._draft = null; this._draw = null; this._placing = false; this._fm.drawPreview(null, []);
+        this.$("editbtn").setAttribute("aria-pressed", String(this._edit));
+        this._fm.update(this._mapSnap()); this._renderBanner(); this._renderSide(); break;
+      case "close": this._sel = null; this._fm.setSelected(null); this._renderSide(); break;
+      case "editpoint": this._edit = true; this.$("editbtn").setAttribute("aria-pressed", "true"); this._renderBanner(); this._openEditor(this._sel); break;
+      case "openpump": {
+        const p = this._point(this._sel);
+        try { localStorage.setItem("hamlet_pump_entry", p.pump_entry); } catch (e) { /* ignore */ }
+        history.pushState(null, "", "/hamlet-pump"); window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+        break;
+      }
+      case "addpoint": this._placing = true; this._draft = null; this._renderBanner(); this._renderSide(); break;
+      case "placecancel": this._placing = false; this._renderBanner(); break;
+      case "gpsplace":
+        try { const c = await this._gps(); this._fm.map.flyTo([c.latitude, c.longitude], 18); this._newPoint(c.latitude, c.longitude); } catch (e) { this._toast(e.message); }
+        break;
+      case "addline": this._draft = null; this._draw = { kind: "pipe", coords: [] }; this._renderBanner(); this._renderSide(); break;
+      case "drawundo": this._draw.coords.pop(); this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); break;
+      case "drawcancel": this._draw = null; this._fm.drawPreview(null, []); this._renderBanner(); this._renderSide(); break;
+      case "drawdone":
+        this._draft = { kind: "shape", id: Math.random().toString(16).slice(2, 10), shape_kind: this._draw.kind, name: "", coords: this._draw.coords };
+        this._draw = null; this._renderBanner(); this._renderSide(); break;
+      case "saveview":
+        try { await this._ws("save_view", { view: this._fm.centre() }); this._toast("The map will open here"); } catch (e) { this._toast(e.message); }
+        break;
+      case "canceledit":
+        this._draft = null; this._confirm = null; this._fm.drawPreview(null, []); this._fm.update(this._mapSnap()); this._renderSide(); break;
+      case "savepoint": {
+        this._readForm();
+        const { kind, ...point } = this._draft;
+        try {
+          const saved = await this._ws("save_point", { point });
+          this._draft = null; this._sel = saved.id; this._fm.setSelected(saved.id); this._renderSide(); this._toast("Saved");
+        } catch (e) { this.$("ferr").textContent = e.message; }
+        break;
+      }
+      case "deletepoint":
+        if (this._confirm !== "del") { this._confirm = "del"; this._renderSide(); return; }
+        try { await this._ws("delete_point", { point_id: this._draft.id }); this._draft = null; this._sel = null; this._confirm = null; this._renderSide(); } catch (e) { this.$("ferr").textContent = e.message; }
+        break;
+      case "saveshape": {
+        this._readForm(); const d = this._draft;
+        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        catch (e) { this.$("ferr").textContent = e.message; }
+        break;
+      }
+      case "deleteshape":
+        if (this._confirm !== "del") { this._confirm = "del"; this._renderSide(); return; }
+        try { await this._ws("delete_shape", { shape_id: this._draft.id }); this._draft = null; this._confirm = null; this._renderSide(); } catch (e) { this.$("ferr").textContent = e.message; }
+        break;
+      case "savesettings":
+        try {
+          await this._ws("save_settings", { settings: { notify_service: this.$("s_notify").value.trim(), alert_delay_s: Number(this.$("s_delay").value) || 0, base: this.$("s_base").value } });
+          this._baseOverride = null; try { localStorage.removeItem("hamlet_farm_base"); } catch (e) { /* ignore */ }
+          this._toast("Saved");
+        } catch (e) { this.$("serr").textContent = e.message; }
+        break;
+      default: break;
+    }
+  }
+
+  _showMe(c) {
+    const L = this._fm.L;
+    if (this._me) this._fm.map.removeLayer(this._me);
+    this._me = L.layerGroup([
+      L.circle([c.latitude, c.longitude], { radius: c.accuracy || 10, color: "#4285f4", weight: 1, fillOpacity: 0.12, interactive: false }),
+      L.circleMarker([c.latitude, c.longitude], { radius: 7, color: "#fff", weight: 2, fillColor: "#4285f4", fillOpacity: 1, interactive: false }),
+    ]).addTo(this._fm.map);
+  }
+}
+
+if (!customElements.get("hamlet-farm-panel")) customElements.define("hamlet-farm-panel", HamletFarmPanel);

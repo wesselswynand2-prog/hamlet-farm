@@ -1,0 +1,23 @@
+{
+  "domain": "hamlet_farm",
+  "name": "Hamlet Farm",
+  "after_dependencies": [
+    "hamlet_pump"
+  ],
+  "codeowners": [
+    "@wesselswynand2-prog"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "frontend",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/wesselswynand2-prog/hamlet-farm",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/wesselswynand2-prog/hamlet-farm/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
