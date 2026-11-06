@@ -1,6 +1,10 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
 import { TYPES, ROLES, SHAPES, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue } from "./hamlet-farm-map.js";
 
+const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
+const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
+const TILE_KB = 22;   // rough size of one saved tile, for the estimate
+
 const DOMAIN = "hamlet_farm";
 const BASE = new URL(".", import.meta.url).href;
 const CLS_LABEL = { run: "Running", on: "On", off: "Off", warn: "Attention", bad: "Fault", offline: "Offline", info: "" };
@@ -132,6 +136,18 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .btn:disabled { opacity: .5; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 6px; }
+.progress i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.drop { border: 2px dashed var(--line); border-radius: 12px; padding: 16px; text-align: center; font-size: 14px; color: var(--muted); cursor: pointer; display: block; }
+.drop:hover { border-color: var(--accent); color: var(--accent); }
+.drop input { display: none; }
+.photo { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.photo:last-child { border-bottom: 0; } .photo .nm { flex: 1; min-width: 0; } .photo .nm div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo .nm .small { color: var(--muted); }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.note { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.note a { color: var(--accent); }
+
 /* events */
 .ev { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .ev:last-child { border-bottom: 0; }
@@ -142,6 +158,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .form { display: grid; gap: 2px; }
 .field { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .field.inline { flex-direction: row; align-items: center; justify-content: space-between; }
+.field.inline > span { white-space: nowrap; }
 .field label { font-size: 14px; } .field .hint { font-size: 12px; color: var(--muted); }
 input[type=number], input[type=text], select, textarea { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--secondary-background-color, transparent); color: var(--primary-text-color); color-scheme: inherit; width: 100%; }
@@ -280,10 +297,11 @@ class HamletFarmPanel extends HTMLElement {
     this._fm.setBase(base);
     this._renderBase(base);
     this._fm.update(this._mapSnap());
+    this._fm.setOffline(s.offline, s.tile_url);
     if (this._first) { this._first = false; this._fm.setView(s.view, s.points, s.shapes, { lat: this._hass.config?.latitude, lng: this._hass.config?.longitude }); }
     if (this._sel && !this._point(this._sel)) this._sel = null;
     this._fm.setSelected(this._sel);
-    if (!this._draft && !this._typing()) this._renderSide();
+    if (!this._draft && !this._typing() && !this._off) this._renderSide();
     this._renderBanner();
   }
 
@@ -334,6 +352,7 @@ class HamletFarmPanel extends HTMLElement {
   /* ------------------------------------------------------------ side panel */
   _renderSide() {
     if (!this._snap) return;
+    if (this._off) return this._renderOffline();
     if (this._draft) return this._renderEditor();
     if (this._sel) return this._renderDetails();
     this._renderOverview();
@@ -380,7 +399,167 @@ class HamletFarmPanel extends HTMLElement {
             <select id="s_base" style="width:auto">${["satellite", "hybrid", "map"].map((b) => `<option value="${b}" ${ss.base === b ? "selected" : ""}>${b[0].toUpperCase() + b.slice(1)}</option>`).join("")}</select></div>
         </div>
         <datalist id="dl-notify">${Object.keys(this._hass.services?.notify || {}).map((k) => `<option value="notify.${esc(k)}"></option>`).join("")}</datalist>
-        <div class="actions"><button class="btn primary" data-act="savesettings">Save</button></div><div class="err" id="serr"></div></section>` : ""}`);
+        <div class="actions"><button class="btn primary" data-act="savesettings">Save</button></div><div class="err" id="serr"></div></section>` : ""}
+      ${this._isAdmin ? this._offlineListHtml() : ""}`);
+  }
+
+  /* ------------------------------------------------------------ offline farm photo */
+  _offlineListHtml() {
+    const layers = this._snap.offline || [];
+    const total = layers.reduce((a, l) => a + (l.bytes || 0), 0);
+    return `<section class="card"><h2>Offline farm photo<span class="sub">${layers.length ? fmtMB(total) + " on Home Assistant" : "admin only"}</span></h2>
+      ${layers.map((l) => `<div class="photo"><ha-icon icon="mdi:image-filter-hdr" style="color:var(--muted)"></ha-icon>
+        <div class="nm"><div>${esc(l.name)}</div><div class="small">${fmtMB(l.bytes)} · ${l.count.toLocaleString()} tiles · zoom ${l.minzoom}–${l.maxzoom}</div></div>
+        <button class="iconbtn" data-offshow="${esc(l.id)}" title="Show on the map"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button>
+        <button class="iconbtn" data-offvis="${esc(l.id)}" title="${l.visible === false ? "Turn on" : "Turn off"}"><ha-icon icon="${l.visible === false ? "mdi:eye-off-outline" : "mdi:eye-outline"}"></ha-icon></button>
+        <button class="iconbtn" data-offdel="${esc(l.id)}" title="Delete" style="${this._confirm === "off:" + l.id ? "color:var(--c-bad)" : ""}"><ha-icon icon="${this._confirm === "off:" + l.id ? "mdi:delete-alert" : "mdi:delete-outline"}"></ha-icon></button></div>`).join("")}
+      ${this._confirm?.startsWith("off:") ? `<div class="small" style="color:var(--c-bad)">Tap the bin again to delete that photo.</div>` : ""}
+      <p class="note">${layers.length ? "" : "Keep an aerial photo of the farm on Home Assistant, so the map has a picture even without internet. "}
+        Use a CD:NGI aerial photo (GeoTIFF – it places itself) or any JPG / PNG you line up by hand.</p>
+      <label class="drop"><input type="file" id="offfile" accept=".tif,.tiff,.jpg,.jpeg,.png,image/tiff,image/jpeg,image/png">
+        <ha-icon icon="mdi:upload"></ha-icon> Add a photo (.tif, .jpg, .png)</label>
+    </section>`;
+  }
+
+  _renderOffline() {
+    const o = this._off; const src = o.src;
+    let body = "";
+    if (o.stage === "loading") {
+      body = `<p class="note">Opening ${esc(o.fileName)}…</p>`;
+    } else if (o.stage === "error") {
+      body = `<div class="err">${esc(o.error)}</div><div class="actions"><button class="btn" data-act="offcancel">Back</button></div>`;
+    } else {
+      const area = this._offArea();
+      const zr = area && src.resM ? this._zoomRange(area, src.resM) : null;
+      const n = zr ? this._countTiles(area, zr[0], zr[1]) : 0;
+      const kmW = src.bounds ? this._distM([src.bounds[0][0], src.bounds[0][1]], [src.bounds[0][0], src.bounds[1][1]]) : 0;
+      const kmH = src.bounds ? this._distM([src.bounds[0][0], src.bounds[0][1]], [src.bounds[1][0], src.bounds[0][1]]) : 0;
+      const saving = o.stage === "saving";
+      const tooBig = n > 60000;
+      body = `
+        ${src.kind === "image" ? `<p class="note">Drag the <b>round corners</b> so the photo lines up with the satellite map (roads, dams, pivots). The middle handle moves the whole photo.</p>
+          <div class="field"><label for="offop">See-through</label><input type="range" id="offop" min="0.2" max="1" step="0.05" value="${o.opacity ?? 0.7}" ${saving ? "disabled" : ""}></div>` : ""}
+        <div class="kv"><span class="muted">Photo</span><span>${src.width.toLocaleString()} × ${src.height.toLocaleString()} px</span></div>
+        ${src.bounds ? `<div class="kv"><span class="muted">Covers</span><span>${fmtKm(kmW)} × ${fmtKm(kmH)}</span></div>` : ""}
+        ${src.resM ? `<div class="kv"><span class="muted">Detail</span><span>${src.resM < 1 ? Math.round(src.resM * 100) + " cm" : src.resM.toFixed(1) + " m"} per pixel</span></div>` : ""}
+        ${src.epsg ? `<div class="kv"><span class="muted">Projection</span><span>EPSG:${src.epsg}</span></div>` : ""}
+        ${src.kind === "geotiff" ? `<h3>What to keep</h3><div class="chips">
+          <button class="chip" data-offarea="view" aria-pressed="${o.area === "view"}" ${saving ? "disabled" : ""}>The map view now</button>
+          <button class="chip" data-offarea="all" aria-pressed="${o.area === "all"}" ${saving ? "disabled" : ""}>The whole photo</button></div>
+          <p class="note" style="margin:6px 0 0">${o.area === "view" ? "Zoom the map to the farm – only the part inside the white frame is kept." : "Keeps everything in the photo."}</p>` : ""}
+        <div class="form">
+          <div class="field"><label for="offname">Name</label><input type="text" id="offname" value="${esc(o.name)}" maxlength="80" ${saving ? "disabled" : ""}></div>
+          <div class="field"><label for="offsrc">Credit</label><span class="hint">Shown small at the bottom of the map</span><input type="text" id="offsrc" value="${esc(o.credit)}" maxlength="120" ${saving ? "disabled" : ""}></div>
+        </div>
+        ${area ? `<div class="kv"><span class="muted">To save</span><span>${n.toLocaleString()} tiles · about ${fmtMB(n * TILE_KB * 1000)} · zoom ${zr[0]}–${zr[1]}</span></div>`
+          : `<div class="err">${src.kind === "geotiff" ? "The photo isn't inside the map view – move the map to the farm, or keep the whole photo." : ""}</div>`}
+        ${tooBig ? `<div class="err">That's too much for Home Assistant – zoom in to just the farm.</div>` : ""}
+        ${saving ? `<div class="progress"><i style="width:${Math.round((o.frac || 0) * 100)}%"></i></div>
+          <div class="small muted">${Math.round((o.frac || 0) * 100)}% · ${(o.done || 0).toLocaleString()} tiles saved (${fmtMB(o.bytes || 0)}). Keep this page open.</div>` : ""}
+        <div class="actions">
+          ${saving ? `<button class="btn" data-act="offstop">Stop</button>`
+            : `<button class="btn primary" data-act="offsave" ${area && !tooBig ? "" : "disabled"}><ha-icon icon="mdi:content-save"></ha-icon>Save to Home Assistant</button>
+               <button class="btn" data-act="offcancel">Cancel</button>`}
+        </div>
+        <div class="err" id="oerr">${esc(o.error || "")}</div>`;
+    }
+    this._setHTML(this.$("side"), `<section class="card" id="offline"><h2>Offline farm photo<span class="sub">${esc(o.fileName)}</span></h2>${body}</section>`);
+  }
+
+  async _offOpen(file) {
+    this._off = { stage: "loading", fileName: file.name, name: file.name.replace(/\.[^.]+$/, ""), credit: "", area: "view", opacity: 0.7 };
+    this._sel = null; this._draft = null;
+    this._renderSide();
+    try {
+      const off = await import("./hamlet-farm-offline.js");
+      this._offLib = off;
+      const tif = /\.tiff?$/i.test(file.name) || file.type === "image/tiff";
+      const src = tif ? await off.openGeoTiff(file) : await off.openImage(file);
+      this._off.src = src;
+      this._off.stage = "place";
+      if (tif) {
+        this._off.credit = "Aerial photo © CD:NGI";
+        this._fm.outline("photo", src.bounds, "#5aaeff");
+        // stay on the farm if the photo covers it, otherwise go to the photo
+        if (!off.intersect(this._fm.bounds(), src.bounds)) this._fm.map.fitBounds(src.bounds, { padding: [30, 30] });
+        this._offAreaOutline();
+      } else {
+        // start the photo in the middle of the map view, with the photo's own shape
+        const vb = this._fm.bounds(); const L = this._fm.L;
+        const c = this._fm.map.getCenter(); const size = this._fm.map.getSize();
+        const k = Math.min((size.x * 0.7) / src.width, (size.y * 0.7) / src.height);
+        const p = this._fm.map.latLngToContainerPoint(c);
+        const nw = this._fm.map.containerPointToLatLng(L.point(p.x - (src.width * k) / 2, p.y - (src.height * k) / 2));
+        const se = this._fm.map.containerPointToLatLng(L.point(p.x + (src.width * k) / 2, p.y + (src.height * k) / 2));
+        void vb;
+        this._fm.alignImage(src.url, [[se.lat, nw.lng], [nw.lat, se.lng]], (b) => { src.setBounds(b); this._offRefresh(); });
+      }
+      if (!this._offMove) {
+        this._offMove = () => { if (this._off?.stage === "place" && this._off.src?.kind === "geotiff") { this._offAreaOutline(); this._offRefresh(); } };
+        this._fm.map.on("moveend", this._offMove);
+      }
+    } catch (e) {
+      Object.assign(this._off, { stage: "error", error: e.message || String(e) });
+    }
+    this._renderSide();
+  }
+
+  _offRefresh() { clearTimeout(this._offT); this._offT = setTimeout(() => this._off && this._renderSide(), 80); }
+  _offArea() {
+    const o = this._off; const src = o?.src; if (!src?.bounds) return null;
+    if (src.kind === "image" || o.area === "all") return src.bounds;
+    return this._offLib.intersect(this._fm.bounds(), src.bounds);
+  }
+  _offAreaOutline() { this._fm.outline("area", this._off?.src?.kind === "geotiff" && this._off.area === "view" ? this._offArea() : null, "#ffffff"); }
+  _zoomRange(a, r) { return this._offLib.zoomRange(a, r); }
+  _countTiles(a, z0, z1) { return this._offLib.countTiles(a, z0, z1); }
+  _distM(a, b) { return this._fm.map.distance(a, b); }
+
+  _offClose() {
+    if (this._off?.src?.url) URL.revokeObjectURL(this._off.src.url);
+    this._off = null; this._fm.clearAlign();
+    this._renderSide();
+  }
+
+  async _offSave() {
+    const o = this._off; const src = o.src; const off = this._offLib;
+    o.name = this.$("offname").value.trim() || o.name; o.credit = this.$("offsrc").value.trim();
+    const area = this._offArea(); if (!area) return;
+    const [z0, z1] = off.zoomRange(area, src.resM);
+    Object.assign(o, { stage: "saving", frac: 0, done: 0, bytes: 0, error: "" });
+    o.ctrl = new AbortController();
+    this._renderSide();
+    let layer;
+    try {
+      layer = await this._ws("offline_create", { layer: { name: o.name, source: o.credit, bounds: area, minzoom: z0, maxzoom: z1 } });
+      o.layerId = layer.id;
+      let batch = []; let size = 0;
+      const flush = async () => {
+        if (!batch.length) return;
+        const tiles = batch; batch = []; size = 0;
+        const res = await this._hass.callApi("POST", `hamlet_farm/upload/${this._entryId}/${layer.id}`, { tiles });
+        o.done = res.count; o.bytes = res.bytes;
+      };
+      await off.makeTiles(src, area, z0, z1, {
+        signal: o.ctrl.signal,
+        onTile: async (z, x, y, blob, ext) => {
+          const b64 = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).split(",")[1]); fr.onerror = reject; fr.readAsDataURL(blob); });
+          batch.push([z, x, y, ext, b64]); size += b64.length;
+          if (size > 2_500_000 || batch.length >= 300) await flush();
+        },
+        onProgress: (frac) => { o.frac = frac; this._renderSide(); },
+      });
+      await flush();
+      await this._ws("offline_finish", { layer_id: layer.id });
+      this._toast(`${o.name} saved – ${o.done.toLocaleString()} tiles`);
+      this._offClose();
+    } catch (e) {
+      const stopped = e?.name === "AbortError";
+      if (layer) { try { await this._ws("offline_delete", { layer_id: layer.id }); } catch (e2) { /* ignore */ } }
+      if (!this._off) return;
+      Object.assign(o, { stage: "place", error: stopped ? "Stopped – nothing was kept." : (e.body?.message || e.message || String(e)) });
+      this._renderSide();
+    }
   }
 
   _rowHtml(p) {
@@ -637,6 +816,9 @@ class HamletFarmPanel extends HTMLElement {
 
   _input(ev) {
     const el = ev.composedPath()[0];
+    if (el?.id === "offfile" && ev.type === "change" && el.files?.[0]) { this._offOpen(el.files[0]); return; }
+    if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
+    if ((el?.id === "offname" || el?.id === "offsrc") && this._off) { this._off[el.id === "offname" ? "name" : "credit"] = el.value; return; }
     if (!this._draft || !el?.id) return;
     if (el.id === "f_extra_add" && ev.type === "change" && el.value.trim()) {
       const ta = this.$("f_extra"); ta.value = (ta.value.trim() ? ta.value.trim() + "\n" : "") + el.value.trim(); el.value = "";
@@ -647,7 +829,8 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const t = path.find((e) => e instanceof HTMLElement && (e.dataset?.act || e.dataset?.tab || e.dataset?.pt || e.dataset?.filter || e.dataset?.base
-      || e.dataset?.ctl || e.dataset?.pmode || e.dataset?.type || e.dataset?.skind || e.dataset?.toggle));
+      || e.dataset?.ctl || e.dataset?.pmode || e.dataset?.type || e.dataset?.skind || e.dataset?.toggle
+      || e.dataset?.offarea || e.dataset?.offshow || e.dataset?.offvis || e.dataset?.offdel));
     if (!t) return;
     const ds = t.dataset;
     if (ds.tab) { if (ds.tab !== this._entryId) this._selectFarm(ds.tab); return; }
@@ -659,6 +842,16 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.offarea) { this._off.area = ds.offarea; this._offAreaOutline(); if (ds.offarea === "all") this._fm.map.fitBounds(this._off.src.bounds, { padding: [30, 30] }); this._renderSide(); return; }
+    if (ds.offshow) { const l = this._snap.offline.find((x) => x.id === ds.offshow); if (l) this._fm.map.fitBounds(l.bounds, { padding: [20, 20] }); return; }
+    if (ds.offvis) { const l = this._snap.offline.find((x) => x.id === ds.offvis); try { await this._ws("offline_visible", { layer: { id: l.id, visible: l.visible === false } }); } catch (e) { this._toast(e.message); } return; }
+    if (ds.offdel) {
+      const key = `off:${ds.offdel}`;
+      if (this._confirm !== key) { this._confirm = key; this._renderSide(); return; }
+      this._confirm = null;
+      try { await this._ws("offline_delete", { layer_id: ds.offdel }); this._toast("Photo deleted"); } catch (e) { this._toast(e.message); }
+      return;
+    }
     if (ds.toggle) { this._hass.callService("homeassistant", "toggle", { entity_id: ds.toggle }); return; }
     if (ds.pmode) {
       const p = this._point(this._sel);
@@ -677,6 +870,9 @@ class HamletFarmPanel extends HTMLElement {
       return;
     }
     switch (ds.act) {
+      case "offsave": this._offSave(); break;
+      case "offstop": this._off?.ctrl?.abort(); break;
+      case "offcancel": this._offClose(); break;
       case "fit": this._fm.fit(this._snap?.points || [], this._snap?.shapes || []); break;
       case "labels": this._labels = !this._labels; this._fm.setLabels(this._labels); try { localStorage.setItem("hamlet_farm_labels", this._labels ? "1" : "0"); } catch (e) { /* ignore */ } break;
       case "locate":

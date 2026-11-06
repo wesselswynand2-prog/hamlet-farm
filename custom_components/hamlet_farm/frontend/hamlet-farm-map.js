@@ -91,6 +91,9 @@ export const MAP_CSS = `
 .hf-icon { background: none; border: 0; }
 .hf-field-lbl { background: none; border: 0; box-shadow: none; color: #fff; font-size: 12px; font-weight: 500; text-shadow: 0 0 3px #000, 0 0 3px #000; }
 .hf-field-lbl::before { display: none; }
+.hf-handle { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid #2a78d6; box-shadow: 0 1px 5px rgba(0,0,0,.6); cursor: grab; }
+.hf-handle.move { width: 26px; height: 26px; background: #2a78d6; border-color: #fff; }
+.leaflet-pane.leaflet-offline-pane img { image-rendering: auto; }
 .hf-vertex { width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #2a78d6; }
 `;
 
@@ -115,6 +118,9 @@ export class FarmMap {
     this.markerLayer = L.layerGroup().addTo(this.map);
     this.drawLayer = L.layerGroup().addTo(this.map);
     this.editing = false; this.selected = null; this.base = null;
+    this.map.createPane("offline").style.zIndex = 250;   // own photos: above the online map, under lines and points
+    this.offline = new Map();
+    this.previewLayer = L.layerGroup().addTo(this.map);
     this.map.on("click", (e) => this.cb.onMapClick && this.cb.onMapClick(e.latlng));
     this.setBase("satellite");
     this._ro = new ResizeObserver(() => this.map.invalidateSize());
@@ -269,6 +275,58 @@ export class FarmMap {
     }
     for (const [id, l] of this.shapes) if (!seen.has(id)) { this.shapeLayer.removeLayer(l); this.shapes.delete(id); }
   }
+
+  /** Offline farm photos stored on Home Assistant. */
+  setOffline(layers, tileUrl) {
+    const L = this.L;
+    const want = new Map((layers || []).filter((l) => l.visible !== false).map((l) => [l.id, l]));
+    for (const [id, tl] of this.offline) if (!want.has(id)) { this.map.removeLayer(tl); this.offline.delete(id); }
+    for (const [id, l] of want) {
+      if (this.offline.has(id)) continue;
+      const b = L.latLngBounds(l.bounds);
+      const tl = L.tileLayer(`${tileUrl}/${id}/{z}/{x}/{y}`, {
+        pane: "offline", minZoom: Math.max(0, l.minzoom - 3), maxZoom: 21, minNativeZoom: l.minzoom, maxNativeZoom: l.maxzoom,
+        bounds: b.pad(0.02), keepBuffer: 4, attribution: esc(l.source || ""),
+      });
+      tl.addTo(this.map);
+      this.offline.set(id, tl);
+    }
+  }
+
+  /** Dashed outline (photo extent / area to keep). */
+  outline(key, bounds, color = "#fff") {
+    const L = this.L;
+    this._outlines = this._outlines || {};
+    if (this._outlines[key]) { this.previewLayer.removeLayer(this._outlines[key]); delete this._outlines[key]; }
+    if (!bounds) return;
+    this._outlines[key] = L.rectangle(bounds, { color, weight: 2, dashArray: "6 5", fill: key === "area", fillOpacity: 0.06, interactive: false }).addTo(this.previewLayer);
+  }
+
+  /** A plain photo laid over the map with two corner handles to line it up. onChange(bounds). */
+  alignImage(url, bounds, onChange) {
+    const L = this.L;
+    this.clearAlign();
+    const ov = L.imageOverlay(url, bounds, { opacity: 0.7, interactive: false }).addTo(this.previewLayer);
+    const handle = (ll) => L.marker(ll, { draggable: true, icon: L.divIcon({ className: "hf-icon", html: '<div class="hf-handle"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(this.previewLayer);
+    const nw = handle([bounds[1][0], bounds[0][1]]), se = handle([bounds[0][0], bounds[1][1]]);
+    const mid = L.marker([(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2], { draggable: true,
+      icon: L.divIcon({ className: "hf-icon", html: '<div class="hf-handle move"></div>', iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(this.previewLayer);
+    const cur = () => { const a = nw.getLatLng(), b = se.getLatLng(); return [[Math.min(a.lat, b.lat), Math.min(a.lng, b.lng)], [Math.max(a.lat, b.lat), Math.max(a.lng, b.lng)]]; };
+    const upd = () => { const b = cur(); ov.setBounds(b); mid.setLatLng([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2]); onChange(b); };
+    nw.on("drag", upd); se.on("drag", upd);
+    let start;
+    mid.on("dragstart", () => { start = { m: mid.getLatLng(), a: nw.getLatLng(), b: se.getLatLng() }; });
+    mid.on("drag", () => {
+      const m = mid.getLatLng(); const dl = m.lat - start.m.lat, dg = m.lng - start.m.lng;
+      nw.setLatLng([start.a.lat + dl, start.a.lng + dg]); se.setLatLng([start.b.lat + dl, start.b.lng + dg]);
+      const b = cur(); ov.setBounds(b); onChange(b);
+    });
+    this._align = { ov };
+    onChange(cur());
+  }
+  setAlignOpacity(v) { this._align?.ov.setOpacity(v); }
+  clearAlign() { this.previewLayer.clearLayers(); this._outlines = {}; this._align = null; }
+  bounds() { const b = this.map.getBounds(); return [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]]; }
 
   /** Line being drawn in edit mode. */
   drawPreview(kind, coords) {

@@ -71,6 +71,7 @@ class HamletFarmCard extends HTMLElement {
     this._snap = s;
     this._fm.setBase(this._config.style || s.settings?.base || "satellite");
     this._fm.update(s);
+    this._fm.setOffline(s.offline, s.tile_url);
     if (first) this._fm.setView(s.view, s.points, s.shapes, { lat: this._hass.config?.latitude, lng: this._hass.config?.longitude });
     const sm = s.summary || {};
     this._root.getElementById("head").innerHTML = `<button class="pill" data-open><ha-icon icon="mdi:map-marker-radius"></ha-icon>${esc(this._config.title || s.name)}</button><span class="grow"></span>

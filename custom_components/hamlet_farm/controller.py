@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -16,7 +17,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import logic
+from . import logic, offline
 from .const import CONF_NAME, DOMAIN, MAX_EVENTS, PUSH_DEBOUNCE_S, SIGNAL_UPDATE, STORE_VERSION, TICK_S
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ class FarmController:
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.events: list[dict] = []
         self.energy_base: dict[str, Any] = {"date": None, "base": {}}
+        self.offline: list[dict] = []
+        self.tile_token: str = ""
         self.statuses: dict[str, dict] = {}
         self.summary: dict = logic.summary([], {})
         self._listeners: list[Callable[[], None]] = []
@@ -60,6 +63,14 @@ class FarmController:
         self.events = list(data.get("events") or [])[-MAX_EVENTS:]
         self.energy_base = data.get("energy_base") or {"date": None, "base": {}}
         self._alerted = set(data.get("alerted") or [])
+        self.tile_token = data.get("tile_token") or secrets.token_urlsafe(18)
+        self.offline = []
+        for layer in data.get("offline") or []:
+            if layer.get("status") == "ready":
+                self.offline.append(layer)
+            else:   # an upload that never finished (browser closed) – throw it away
+                await self.hass.async_add_executor_job(
+                    offline.remove_tree, offline.layer_dir(self.hass, self.entry.entry_id, layer["id"]))
         self._retrack()
         self._unsubs.append(async_track_time_interval(self.hass, self._tick, timedelta(seconds=TICK_S)))
         self._recompute()
@@ -91,6 +102,7 @@ class FarmController:
         return {
             "points": self.points, "shapes": self.shapes, "view": self.view, "settings": self.settings,
             "events": self.events[-MAX_EVENTS:], "energy_base": self.energy_base, "alerted": sorted(self._alerted),
+            "tile_token": self.tile_token, "offline": self.offline,
         }
 
     def _save(self) -> None:
@@ -311,6 +323,62 @@ class FarmController:
         self._retrack()
         self._recompute()
 
+    # ------------------------------------------------------------ offline pictures
+    def offline_layer(self, layer_id: str) -> dict | None:
+        return next((x for x in self.offline if x["id"] == layer_id), None)
+
+    def offline_create(self, raw: dict) -> dict:
+        b = raw.get("bounds")
+        try:
+            (s, w), (n, e) = b
+            s, w, n, e = float(s), float(w), float(n), float(e)
+        except (TypeError, ValueError) as err:
+            raise ValueError("bad picture bounds") from err
+        if not (-90 <= s < n <= 90 and -180 <= w < e <= 180):
+            raise ValueError("bad picture bounds")
+        zmin, zmax = int(raw.get("minzoom", 12)), int(raw.get("maxzoom", 19))
+        if not 0 <= zmin <= zmax <= 22:
+            raise ValueError("bad zoom range")
+        layer = {
+            "id": logic.new_id() + logic.new_id(), "name": str(raw.get("name") or "Aerial photo")[:80],
+            "source": str(raw.get("source") or "")[:120], "bounds": [[s, w], [n, e]],
+            "minzoom": zmin, "maxzoom": zmax, "count": 0, "bytes": 0, "status": "uploading",
+            "created": dt_util.now().isoformat(), "visible": True,
+        }
+        self.offline.append(layer)
+        self._save()
+        return layer
+
+    def offline_progress(self, layer_id: str, count: int, size: int) -> None:
+        if layer := self.offline_layer(layer_id):
+            layer["count"] += count
+            layer["bytes"] += size
+
+    def offline_finish(self, layer_id: str) -> dict:
+        layer = self.offline_layer(layer_id)
+        if layer is None:
+            raise ValueError("Picture not found")
+        if not layer["count"]:
+            raise ValueError("No part of the picture was saved")
+        layer["status"] = "ready"
+        self._changed()
+        return layer
+
+    def offline_visible(self, raw: dict) -> None:
+        layer = self.offline_layer(str(raw.get("id")))
+        if layer is None:
+            raise ValueError("Picture not found")
+        layer["visible"] = bool(raw.get("visible"))
+        self._changed()
+
+    async def async_offline_delete(self, layer_id: str) -> None:
+        layer = self.offline_layer(layer_id)
+        if layer is None:
+            raise ValueError("Picture not found")
+        self.offline.remove(layer)
+        self._changed()
+        await self.hass.async_add_executor_job(offline.remove_tree, offline.layer_dir(self.hass, self.entry.entry_id, layer_id))
+
     # ------------------------------------------------------------ snapshot
     def snapshot(self) -> dict:
         return {
@@ -323,4 +391,6 @@ class FarmController:
             "statuses": self.statuses,
             "summary": self.summary,
             "events": list(reversed(self.events[-10:])),
+            "offline": [x for x in self.offline if x.get("status") == "ready"],
+            "tile_url": f"/api/hamlet_farm/tiles/{self.tile_token}",
         }

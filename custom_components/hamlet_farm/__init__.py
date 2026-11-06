@@ -15,6 +15,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, PANEL_COMPONENT, PANEL_URL_PATH, STATIC_URL, VERSION
 from .controller import FarmController
+from .offline import OfflineTileView, OfflineUploadView, remove_tree, root_dir
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -59,8 +60,17 @@ def _controllers(hass: HomeAssistant) -> dict[str, FarmController]:
     return {k: v for k, v in hass.data.get(DOMAIN, {}).items() if isinstance(v, FarmController)}
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Farm deleted: remove its offline pictures from disk."""
+    await hass.async_add_executor_job(remove_tree, root_dir(hass, entry.entry_id))
+
+
 async def _async_register_panel(hass: HomeAssistant) -> None:
     data = hass.data[DOMAIN]
+    if not data.get("_views"):
+        hass.http.register_view(OfflineUploadView())
+        hass.http.register_view(OfflineTileView())
+        data["_views"] = True
     if not data.get("_static"):
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
@@ -97,7 +107,8 @@ def _register_websocket(hass: HomeAssistant) -> None:
         return
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
-                    ws_delete_shape, ws_save_view, ws_save_settings):
+                    ws_delete_shape, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
+                    ws_offline_visible, ws_offline_delete):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -157,3 +168,20 @@ ws_save_shape = _edit("save_shape", {vol.Required("shape"): dict})
 ws_delete_shape = _edit("delete_shape", {vol.Required("shape_id"): str})
 ws_save_view = _edit("save_view", {vol.Required("view"): dict})
 ws_save_settings = _edit("save_settings", {vol.Required("settings"): dict})
+ws_offline_create = _edit("offline_create", {vol.Required("layer"): dict})
+ws_offline_finish = _edit("offline_finish", {vol.Required("layer_id"): str})
+ws_offline_visible = _edit("offline_visible", {vol.Required("layer"): dict})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/offline_delete", vol.Required("entry_id"): str,
+                                  vol.Required("layer_id"): str})
+@websocket_api.async_response
+async def ws_offline_delete(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            await controller.async_offline_delete(msg["layer_id"])
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"result": None, **controller.snapshot()})

@@ -65,7 +65,23 @@ A point with *Alert when this point has a problem* on (default) alerts when it i
 
 ## Map pictures
 
-Satellite and Hybrid use Esri World Imagery (free, no key); Map uses OpenStreetMap. The map library is part of the app, but the pictures come from the internet – on a farm without internet the points and status still work over the local network, only the background stays blank. Pictures already looked at are kept by the browser.
+Satellite and Hybrid use Esri World Imagery (free, no key); Map uses OpenStreetMap. Those pictures come from the internet. For farms with poor or no internet, save an **offline farm photo** on Home Assistant (below).
+
+## Offline farm photo (no internet needed)
+
+Keeps an aerial photo of the farm on the client's Home Assistant, so the map always has a picture behind the pumps and pivots – over the farm's own Wi-Fi, without internet.
+
+1. Get an aerial photo of the farm:
+   - **CD:NGI aerial photos** (government, 25–50 cm detail, free): from the CD:NGI geospatial portal or the NGI office. Download the GeoTIFF sheet(s) that cover the farm – the 1:10 000 sheet number is like `2528CA12`. Lat/long (WGS84, EPSG:4326), Lo (Hartebeesthoek94 or Cape) and UTM files all work.
+   - Or any **JPG / PNG** photo of the farm (drone photo, survey photo) – you line it up by hand.
+2. Farm map page → **Offline farm photo** (bottom of the list, admin only) → **Add a photo** and pick the file. Best done on a PC – NGI files are big.
+3. **GeoTIFF:** it places itself. Zoom the map so the white frame is around the farm (*The map view now*), or keep *The whole photo*.
+   **JPG / PNG:** drag the round corners until it lines up with the satellite map, then save.
+4. **Save to Home Assistant.** The browser cuts the photo into map tiles and uploads them – keep the page open until it says *saved*. A 3 × 3 km farm at 25 cm is roughly 3 000 tiles / 60 MB.
+
+Farms across two NGI sheets: add both. Photos can be turned off (eye), shown or deleted from the same list. They're stored in `/config/hamlet_farm/` and included in Home Assistant backups.
+
+Only the photo is offline – Google Maps *Directions* still need mobile data.
 
 **Directions** on any point opens Google Maps navigation to it – handy for a technician who hasn't been to the farm.
 

@@ -131,3 +131,78 @@ async def test_non_admin_cannot_edit(hass: HomeAssistant, hass_ws_client, hass_r
     await ws.send_json({"id": 2, "type": f"{DOMAIN}/state", "entry_id": entry.entry_id})
     r = await ws.receive_json()
     assert r["success"] and r["result"]["is_admin"] is False
+
+
+def _jpeg() -> str:
+    import base64
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (256, 256), (90, 110, 60)).save(buf, "JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+async def test_offline_picture(hass: HomeAssistant, hass_ws_client, hass_client, hass_client_no_auth):
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/offline_create", "entry_id": entry.entry_id,
+                        "layer": {"name": "NGI 2527DC", "bounds": [[-25.9, 28.0], [-25.8, 28.2]], "minzoom": 14, "maxzoom": 18}})
+    r = await _reply(ws, 1)
+    assert r["success"], r
+    layer = r["result"]["result"]
+    assert r["result"]["offline"] == []          # not shown until finished
+
+    client = await hass_client()
+    url = f"/api/hamlet_farm/upload/{entry.entry_id}/{layer['id']}"
+    resp = await client.post(url, json={"tiles": [[18, 150000, 140000, "jpg", _jpeg()], [17, 75000, 70000, "jpg", _jpeg()]]})
+    assert resp.status == 200, await resp.text()
+    assert (await resp.json())["count"] == 2
+    resp = await client.post(url, json={"tiles": [[18, 1, 1, "jpg", "bm90IGFuIGltYWdl"]]})   # not an image
+    assert resp.status == 400
+
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/offline_finish", "entry_id": entry.entry_id, "layer_id": layer["id"]})
+    r = await _reply(ws, 2)
+    assert r["success"] and r["result"]["offline"][0]["count"] == 2
+    tile_url = r["result"]["tile_url"]
+
+    anon = await hass_client_no_auth()
+    resp = await anon.get(f"{tile_url}/{layer['id']}/18/150000/140000")
+    assert resp.status == 200 and resp.content_type == "image/jpeg"
+    resp = await anon.get(f"{tile_url}/{layer['id']}/18/1/2")                 # not covered -> transparent
+    assert resp.status == 200 and resp.content_type == "image/png"
+    resp = await anon.get(f"/api/hamlet_farm/tiles/wrong/{layer['id']}/18/150000/140000")
+    assert resp.status == 404
+    resp = await anon.post(url, json={"tiles": []})
+    assert resp.status == 401
+
+    folder = hass.config.path("hamlet_farm", entry.entry_id, layer["id"])
+    import os
+    assert os.path.isdir(folder)
+    await ws.send_json({"id": 3, "type": f"{DOMAIN}/offline_delete", "entry_id": entry.entry_id, "layer_id": layer["id"]})
+    r = await _reply(ws, 3)
+    assert r["success"] and r["result"]["offline"] == []
+    assert not os.path.exists(folder)
+
+    # an unfinished upload is cleaned up on restart
+    await ws.send_json({"id": 4, "type": f"{DOMAIN}/offline_create", "entry_id": entry.entry_id,
+                        "layer": {"bounds": [[-25.9, 28.0], [-25.8, 28.2]]}})
+    lid = (await _reply(ws, 4))["result"]["result"]["id"]
+    await client.post(f"/api/hamlet_farm/upload/{entry.entry_id}/{lid}", json={"tiles": [[18, 150000, 140000, "jpg", _jpeg()]]})
+    await hass.data[DOMAIN][entry.entry_id]._store.async_save(hass.data[DOMAIN][entry.entry_id]._data())
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.data[DOMAIN][entry.entry_id].offline == []
+    assert not os.path.exists(hass.config.path("hamlet_farm", entry.entry_id, lid))
+
+
+async def test_offline_upload_admin_only(hass: HomeAssistant, hass_ws_client, hass_client, hass_read_only_access_token):
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/offline_create", "entry_id": entry.entry_id,
+                        "layer": {"bounds": [[-25.9, 28.0], [-25.8, 28.2]]}})
+    lid = (await _reply(ws, 1))["result"]["result"]["id"]
+    ro = await hass_client(hass_read_only_access_token)
+    resp = await ro.post(f"/api/hamlet_farm/upload/{entry.entry_id}/{lid}", json={"tiles": []})
+    assert resp.status == 403
