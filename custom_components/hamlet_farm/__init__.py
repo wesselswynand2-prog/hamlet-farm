@@ -15,6 +15,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, PANEL_COMPONENT, PANEL_URL_PATH, STATIC_URL, VERSION
 from .controller import FarmController
+from .docs import DocFileView
 from .notes import PhotoUploadView, PhotoView
 from .offline import OfflineTileView, OfflineUploadView, remove_tree, root_dir
 
@@ -73,6 +74,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         hass.http.register_view(OfflineTileView())
         hass.http.register_view(PhotoUploadView())
         hass.http.register_view(PhotoView())
+        hass.http.register_view(DocFileView())
         data["_views"] = True
     if not data.get("_static"):
         await hass.http.async_register_static_paths(
@@ -111,7 +113,8 @@ def _register_websocket(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
-                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete):
+                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete,
+                    ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -226,3 +229,72 @@ def ws_note_delete(hass, connection, msg):
             connection.send_error(msg["id"], "invalid", str(err))
             return
         connection.send_result(msg["id"], {"notes": controller.notes_for(msg["target"])})
+
+
+# ------------------------------------------------------------------ quotes / documents
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/docs", vol.Required("entry_id"): str})
+@callback
+def ws_docs(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user), "is_admin": connection.user.is_admin})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_users", vol.Required("entry_id"): str})
+@websocket_api.async_response
+async def ws_doc_users(hass, connection, msg):
+    users = await hass.auth.async_get_users()
+    connection.send_result(msg["id"], [{"id": u.id, "name": u.name or "?", "admin": u.is_admin}
+                                       for u in users if u.is_active and not u.system_generated])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_create", vol.Required("entry_id"): str, vol.Required("doc"): dict})
+@callback
+def ws_doc_create(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            doc = controller.doc_create(msg["doc"], connection.user)
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], doc)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_update", vol.Required("entry_id"): str, vol.Required("doc"): dict})
+@callback
+def ws_doc_update(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            controller.doc_update(msg["doc"])
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user)})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_delete", vol.Required("entry_id"): str, vol.Required("doc_id"): str})
+@websocket_api.async_response
+async def ws_doc_delete(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            await controller.async_doc_delete(msg["doc_id"])
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_respond", vol.Required("entry_id"): str, vol.Required("doc_id"): str,
+                                  vol.Required("answer"): vol.In(["accepted", "declined"]), vol.Optional("note", default=""): str})
+@callback
+def ws_doc_respond(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            controller.doc_respond(msg["doc_id"], msg["answer"], msg["note"], connection.user)
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user)})

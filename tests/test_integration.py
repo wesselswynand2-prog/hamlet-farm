@@ -262,3 +262,57 @@ async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client
     await hass.async_block_till_done()
     assert not os.path.exists(path)
     assert hass.data[DOMAIN][entry.entry_id].notes == {}
+
+
+async def test_quotes(hass: HomeAssistant, hass_ws_client, hass_client, hass_read_only_access_token, hass_read_only_user, hass_admin_user):
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    notify = async_mock_service(hass, "notify", "mobile_app_wynand")
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/save_settings", "entry_id": entry.entry_id, "settings": {"notify_service": "notify.mobile_app_wynand"}})
+    assert (await _reply(ws, 1))["success"]
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/doc_users", "entry_id": entry.entry_id})
+    users = (await _reply(ws, 2))["result"]
+    assert any(u["id"] == hass_read_only_user.id for u in users)
+
+    async def make(mid, title, users_):
+        await ws.send_json({"id": mid, "type": f"{DOMAIN}/doc_create", "entry_id": entry.entry_id,
+                            "doc": {"title": title, "kind": "quote", "amount": "R 18 500", "users": users_, "filename": "q.pdf"}})
+        doc = (await _reply(ws, mid))["result"]
+        client = await hass_client()
+        resp = await client.post(f"/api/hamlet_farm/doc/{entry.entry_id}/{doc['id']}", data=b"%PDF-1.4 test")
+        assert resp.status == 200, await resp.text()
+        return doc
+
+    shared = await make(3, "New borehole pump", [hass_read_only_user.id])
+    private = await make(4, "Internal costing", [])
+    client = await hass_client()
+    resp = await client.post(f"/api/hamlet_farm/doc/{entry.entry_id}/{shared['id']}", data=b"MZ not allowed")
+    assert resp.status == 400
+
+    # the client user only sees what was shared with them, without the share list
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/docs", "entry_id": entry.entry_id})
+    docs = (await _reply(ro, 1))["result"]["docs"]
+    assert [d["title"] for d in docs] == ["New borehole pump"] and "users" not in docs[0]
+    roc = await hass_client(hass_read_only_access_token)
+    resp = await roc.get(f"/api/hamlet_farm/doc/{entry.entry_id}/{shared['id']}")
+    assert resp.status == 200 and resp.content_type == "application/pdf"
+    resp = await roc.get(f"/api/hamlet_farm/doc/{entry.entry_id}/{private['id']}")
+    assert resp.status == 404
+    resp = await roc.post(f"/api/hamlet_farm/doc/{entry.entry_id}/{shared['id']}", data=b"%PDF-")
+    assert resp.status == 403
+
+    # accept -> installer is told
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/doc_respond", "entry_id": entry.entry_id, "doc_id": shared["id"],
+                        "answer": "accepted", "note": "Go ahead on Monday"})
+    r = await _reply(ro, 2)
+    assert r["success"] and r["result"]["docs"][0]["status"] == "accepted"
+    await hass.async_block_till_done()
+    assert notify and "accepted" in notify[-1].data["message"] and "Monday" in notify[-1].data["message"]
+    await ro.send_json({"id": 3, "type": f"{DOMAIN}/doc_respond", "entry_id": entry.entry_id, "doc_id": private["id"], "answer": "accepted"})
+    assert not (await _reply(ro, 3))["success"]
+
+    await ws.send_json({"id": 5, "type": f"{DOMAIN}/doc_delete", "entry_id": entry.entry_id, "doc_id": shared["id"]})
+    assert (await _reply(ws, 5))["success"]
+    import os
+    assert not os.path.exists(hass.config.path("hamlet_farm", entry.entry_id, "docs", shared["id"]))

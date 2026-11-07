@@ -69,6 +69,16 @@ Tap a pump, pivot, Eskom point – or a line, drawing or piece of land – to op
 
 **Map** goes back to the map at that point.
 
+## Quotes and documents
+
+Share quotes, invoices, COCs and plans with the client – only with the people you pick.
+
+1. Farm map → **Quotes & documents** → **Upload** (admin). Or **Upload** on a point's page to link it to that pump or pivot.
+2. Pick the file (PDF, JPG or PNG, up to 15 MB), give it a title, type and amount, and tick **who may see it** – the client's Home Assistant users (Settings → People).
+3. Those people see it in the list (and on the point's page) and can **Open** it, save it, and for a quote **Accept** or **Decline** with a comment. You get a notification (and on your phone, if *Send alerts to* is set) straight away.
+
+Who can see what: only the users you ticked, plus **every admin** of that Home Assistant – admins can always see everything, so give the client's people normal (non-admin) accounts. Files are kept in `/config/hamlet_farm/` on the client's Home Assistant and are part of its backups; they are only sent to someone who is logged in and allowed to see them.
+
 ## Measure and draw
 
 - **Measure** (ruler button on the map, for everyone): tap the map – or a point to snap to it – to measure a pipe or cable run; every corner shows the distance so far. **Area** closes the shape and shows hectares. Admins can **Save as line** to keep it as a pipe, power line or land.

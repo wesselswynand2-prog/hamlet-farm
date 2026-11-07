@@ -17,7 +17,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import logic, notes as notes_mod, offline
+from . import docs as docs_mod, logic, notes as notes_mod, offline
 from .const import CONF_NAME, DOMAIN, MAX_EVENTS, PUSH_DEBOUNCE_S, SIGNAL_UPDATE, STORE_VERSION, TICK_S
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class FarmController:
         self.events: list[dict] = []
         self.energy_base: dict[str, Any] = {"date": None, "base": {}}
         self.notes: dict[str, list[dict]] = {}
+        self.docs: list[dict] = []
         self.offline: list[dict] = []
         self.tile_token: str = ""
         self.statuses: dict[str, dict] = {}
@@ -66,6 +67,7 @@ class FarmController:
         self._alerted = set(data.get("alerted") or [])
         self.tile_token = data.get("tile_token") or secrets.token_urlsafe(18)
         self.notes = {k: v for k, v in (data.get("notes") or {}).items() if isinstance(v, list)}
+        self.docs = [d for d in (data.get("docs") or []) if d.get("size")]   # drop uploads that never got their file
         await self.hass.async_add_executor_job(notes_mod.clean_orphans, self.hass, self.entry.entry_id, self._photo_ids())
         self.offline = []
         for layer in data.get("offline") or []:
@@ -105,7 +107,7 @@ class FarmController:
         return {
             "points": self.points, "shapes": self.shapes, "view": self.view, "settings": self.settings,
             "events": self.events[-MAX_EVENTS:], "energy_base": self.energy_base, "alerted": sorted(self._alerted),
-            "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes,
+            "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes, "docs": self.docs,
         }
 
     def _save(self) -> None:
@@ -350,7 +352,99 @@ class FarmController:
         self._save()
         self._recompute()
 
+    # ------------------------------------------------------------ quotes / documents
+    def doc(self, doc_id: str) -> dict | None:
+        return next((d for d in self.docs if d["id"] == doc_id), None)
+
+    def docs_for(self, user) -> list[dict]:
+        out = [d for d in self.docs if d.get("size") and docs_mod.can_see(d, user)]
+        if not (user and user.is_admin):   # clients don't need to see who else it is shared with
+            out = [{k: v for k, v in d.items() if k != "users"} for d in out]
+        return sorted(out, key=lambda d: d.get("created", ""), reverse=True)
+
+    def _clean_doc(self, raw: dict, doc: dict) -> dict:
+        if "title" in raw:
+            doc["title"] = str(raw.get("title") or "").strip()[:100] or doc.get("title") or "Quote"
+        if "kind" in raw:
+            doc["kind"] = raw["kind"] if raw["kind"] in docs_mod.KINDS else "other"
+        if "amount" in raw:
+            doc["amount"] = str(raw.get("amount") or "").strip()[:40]
+        if "notes" in raw:
+            doc["notes"] = str(raw.get("notes") or "").strip()[:1000]
+        if "point" in raw:
+            pt = raw.get("point") or None
+            doc["point"] = pt if pt and (any(p["id"] == pt for p in self.points) or any(x["id"] == pt for x in self.shapes)) else None
+        if "users" in raw:
+            if not isinstance(raw["users"], list):
+                raise ValueError("users must be a list")
+            doc["users"] = [str(u)[:64] for u in raw["users"]][:50]
+        return doc
+
+    def doc_create(self, raw: dict, user) -> dict:
+        doc = {"id": logic.new_id() + logic.new_id(), "title": "Quote", "kind": "quote", "amount": "", "notes": "", "point": None,
+               "users": [], "filename": str(raw.get("filename") or "document")[:120], "mime": None, "size": 0,
+               "created": dt_util.now().isoformat(), "by": (user.name if user else None) or "Admin",
+               "status": "new", "status_by": None, "status_at": None, "status_note": ""}
+        self._clean_doc(raw, doc)
+        self.docs.append(doc)
+        return doc
+
+    def doc_file_saved(self, doc_id: str, mime: str, size: int) -> None:
+        if doc := self.doc(doc_id):
+            doc["mime"], doc["size"] = mime, size
+            self._save()
+
+    def doc_update(self, raw: dict) -> dict:
+        doc = self.doc(str(raw.get("id")))
+        if doc is None:
+            raise ValueError("Document not found")
+        self._clean_doc(raw, doc)
+        if raw.get("reset_status"):
+            doc.update(status="new", status_by=None, status_at=None, status_note="")
+        self._save()
+        return doc
+
+    async def async_doc_delete(self, doc_id: str) -> None:
+        doc = self.doc(doc_id)
+        if doc is None:
+            raise ValueError("Document not found")
+        self.docs.remove(doc)
+        self._save()
+        await self.hass.async_add_executor_job(lambda: docs_mod.doc_path(self.hass, self.entry.entry_id, doc_id).unlink(missing_ok=True))
+
+    def doc_respond(self, doc_id: str, answer: str, note: str, user) -> dict:
+        doc = self.doc(doc_id)
+        if doc is None or not docs_mod.can_see(doc, user):
+            raise ValueError("Document not found")
+        if doc.get("kind") != "quote":
+            raise ValueError("Only quotes can be accepted or declined")
+        if answer not in ("accepted", "declined"):
+            raise ValueError("bad answer")
+        doc.update(status=answer, status_by=(user.name if user else None) or "Someone", status_at=dt_util.now().isoformat(),
+                   status_note=str(note or "").strip()[:1000])
+        self._save()
+        msg = f"Quote “{doc['title']}”{' (' + doc['amount'] + ')' if doc.get('amount') else ''} was {answer} by {doc['status_by']}."
+        if doc["status_note"]:
+            msg += f"\n“{doc['status_note']}”"
+        self.hass.async_create_task(self._send_doc_msg(doc, msg))
+        return doc
+
+    async def _send_doc_msg(self, doc: dict, msg: str) -> None:
+        title = f"{self.name} – quote {doc['status']}"
+        if self.hass.services.has_service("persistent_notification", "create"):
+            await self.hass.services.async_call("persistent_notification", "create",
+                                                {"title": title, "message": msg, "notification_id": f"{DOMAIN}_doc_{doc['id']}"}, blocking=False)
+        svc = self.settings.get("notify_service") or ""
+        if svc.startswith("notify.") and self.hass.services.has_service("notify", svc.split(".", 1)[1]):
+            try:
+                await self.hass.services.async_call("notify", svc.split(".", 1)[1], {"title": title, "message": msg}, blocking=False)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("%s: notify %s failed: %s", self.name, svc, err)
+
     def _drop_notes(self, target: str) -> None:
+        for d in self.docs:
+            if d.get("point") == target:
+                d["point"] = None
         gone = self.notes.pop(target, [])
         photos = [n["photo"] for n in gone if n.get("photo")]
         if photos:

@@ -3,7 +3,10 @@ import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, cls
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
-const TILE_KB = 22;   // rough size of one saved tile, for the estimate
+const TILE_KB = 22;
+const DOC_KINDS = { quote: ["Quote", "mdi:file-document-edit-outline"], invoice: ["Invoice", "mdi:receipt-text-outline"], coc: ["COC / certificate", "mdi:certificate-outline"],
+  drawing: ["Drawing / plan", "mdi:floor-plan"], other: ["Document", "mdi:file-outline"] };
+const STATUS = { new: ["Waiting for answer", "var(--accent)"], accepted: ["Accepted", "var(--c-ok)"], declined: ["Declined", "var(--c-bad)"] };   // rough size of one saved tile, for the estimate
 
 const DOMAIN = "hamlet_farm";
 const BASE = new URL(".", import.meta.url).href;
@@ -180,6 +183,24 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 20px; }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; }
 
+/* quotes & documents */
+.modal { position: fixed; inset: 0; z-index: 1500; background: rgba(0,0,0,.45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 12px; overflow-y: auto; }
+.modal > .card { width: 100%; max-width: 560px; }
+.doc { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; }
+.doc:last-child { border-bottom: 0; } .doc:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.doc > ha-icon { color: var(--muted); flex: none; }
+.doc .nm { flex: 1; min-width: 0; } .doc .nm div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; } .doc .nm .small { color: var(--muted); font-size: 12px; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--pc) 14%, transparent); color: var(--pc); }
+.users label { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; cursor: pointer; }
+.users input { width: 18px; height: 18px; accent-color: var(--accent); }
+.viewer { position: fixed; inset: 0; z-index: 1700; background: rgba(0,0,0,.9); display: flex; flex-direction: column; }
+.viewer .vbar { display: flex; gap: 8px; align-items: center; padding: 10px; color: #fff; }
+.viewer .vbar b { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer .vbar .btn { color: #fff; border-color: rgba(255,255,255,.35); }
+.viewer iframe, .viewer .vimg { flex: 1; border: 0; background: #fff; width: 100%; }
+.viewer .vimg { background: none; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.viewer .vimg img { max-width: 100%; max-height: 100%; }
+
 /* events */
 .ev { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .ev:last-child { border-bottom: 0; }
@@ -263,6 +284,8 @@ class HamletFarmPanel extends HTMLElement {
           <div class="page" id="page" hidden></div>
         </div>
         <div class="lightbox" id="lightbox" hidden><img alt=""></div>
+        <div class="modal" id="docmodal" hidden><section class="card" id="docbody"></section></div>
+        <div class="viewer" id="viewer" hidden></div>
       </div>`;
     const mb = document.createElement("ha-menu-button");
     mb.hass = this._hass; mb.narrow = this._narrow;
@@ -270,6 +293,7 @@ class HamletFarmPanel extends HTMLElement {
     this._menuBtn = mb;
     root.addEventListener("click", (ev) => this._click(ev));
     root.getElementById("lightbox").addEventListener("click", (ev) => { ev.currentTarget.hidden = true; });
+    root.getElementById("docmodal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) this._closeDoc(); });
     root.addEventListener("input", (ev) => this._input(ev));
     root.addEventListener("change", (ev) => this._input(ev));
     root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._search(); });
@@ -317,6 +341,7 @@ class HamletFarmPanel extends HTMLElement {
       this._apply(s);
     } catch (e) { this.$("side").innerHTML = `<div class="card loading">${esc(e.message)}</div>`; return; }
     this._subscribe();
+    this._loadDocs();
   }
   async _subscribe() {
     if (!this._entryId || this._unsub) return;
@@ -349,7 +374,7 @@ class HamletFarmPanel extends HTMLElement {
     if (!d || d.kind !== "point" || this._point(d.id)) return s;
     return { ...s, points: [...s.points, { ...d, name: d.name || "New point" }] };
   }
-  _typing() { const a = this.shadowRoot.activeElement; return !!(a && a.closest && a.closest("#settings, #editor")); }
+  _typing() { const a = this.shadowRoot.activeElement; return !!(a && a.closest && a.closest("#settings, #editor, #docbody")); }
 
   _point(id) { return this._snap?.points.find((p) => p.id === id); }
   _st(id) { return this._snap?.statuses?.[id] || {}; }
@@ -439,6 +464,7 @@ class HamletFarmPanel extends HTMLElement {
         ${pts.length ? `<div class="chips" style="margin-bottom:8px">${chip("all", "All")}${sm.alerts ? chip("alerts", `Alerts (${sm.alerts})`, "mdi:alert-outline") : ""}${types.map((t) => chip(t, TYPES[t]?.label || t, ICON(t))).join("")}</div>` : ""}
         <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._isAdmin ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is." : "No points on the map yet."}</div>`}</div>
       </section>
+      ${this._docsCardHtml()}
       ${evs.length ? `<section class="card"><h2>Alerts<span class="sub">last ${evs.length}</span></h2>
         ${evs.map((e) => `<div class="ev"><i style="background:${e.cls === "ok" ? "var(--c-ok)" : e.cls === "warn" ? "var(--c-warn)" : e.cls === "offline" ? "#8a8f96" : "var(--c-bad)"}"></i>
           <div><b style="font-weight:500">${esc(e.name)}</b>: ${esc(e.text)}<div class="when">${dstr(e.t)}</div></div></div>`).join("")}
@@ -722,7 +748,7 @@ class HamletFarmPanel extends HTMLElement {
     this._sel = kind === "point" ? id : null; this._fm.setSelected(this._sel); this._confirm = null;
     const el = this.$("page");
     el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
-      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-pump"></div><section class="card" id="pg-info"></section></div>
+      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
         <div class="col"><section class="card" id="pg-log"><h2>Site log<span class="sub" id="pg-count"></span></h2>
           <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
             <div id="npv"></div>
@@ -765,6 +791,167 @@ class HamletFarmPanel extends HTMLElement {
   _renderPage() {
     const t = this._pageTarget(); if (!t || !this.$("pg-head")) return;
     if (this._page.kind === "point") this._renderPointPage(t); else this._renderShapePage(t);
+    const docs = (this._docs || []).filter((d) => d.point === t.id);
+    const box = this.$("pg-docs");
+    box.hidden = !docs.length && !this._isAdmin;
+    this._setHTML(box, `<h2>Quotes &amp; documents${this._isAdmin ? `<span class="sub"><button class="btn" data-act="docnew" data-docpoint="${esc(t.id)}" style="padding:4px 12px">Upload</button></span>` : ""}</h2>
+      ${docs.map((d) => this._docRowHtml(d)).join("") || `<div class="empty" style="padding:8px 0">Nothing yet.</div>`}`);
+  }
+
+  /* ------------------------------------------------------------ quotes & documents */
+  async _loadDocs() {
+    try {
+      const r = await this._hass.callWS({ type: `${DOMAIN}/docs`, entry_id: this._entryId });
+      this._docs = r.docs;
+    } catch (e) { this._docs = []; }
+    this._docsChanged();
+  }
+  _docsChanged() {
+    if (this._page) this._renderPage();
+    else if (!this._draft && !this._off && !this.shadowRoot.activeElement?.closest?.("#settings, #editor")) { this._setHTML(this.$("side"), ""); this._renderSide(); }
+    if (this._docModal?.view) this._renderDocModal();
+  }
+
+  _docsCardHtml() {
+    const docs = this._docs || [];
+    if (!docs.length && !this._isAdmin) return "";
+    const waiting = docs.filter((d) => d.kind === "quote" && d.status === "new").length;
+    return `<section class="card"><h2>Quotes &amp; documents<span class="sub">${waiting ? `${waiting} waiting` : this._isAdmin ? "" : ""}</span></h2>
+      ${docs.map((d) => this._docRowHtml(d)).join("") || `<p class="note">Upload quotes, invoices, COCs or plans. Pick who on the client's side may see each one – only they (and admins) can open it.</p>`}
+      ${this._isAdmin ? `<div class="actions"><button class="btn primary" data-act="docnew"><ha-icon icon="mdi:upload"></ha-icon>Upload</button></div>` : ""}</section>`;
+  }
+
+  _docRowHtml(d) {
+    const [kl, icon] = DOC_KINDS[d.kind] || DOC_KINDS.other;
+    const st = d.kind === "quote" ? STATUS[d.status] || STATUS.new : null;
+    return `<button class="doc" data-doc="${esc(d.id)}"><ha-icon icon="${icon}"></ha-icon>
+      <span class="nm"><div>${esc(d.title)}</div><div class="small">${esc(kl)}${d.amount ? ` · ${esc(d.amount)}` : ""} · ${dstr(d.created)}</div></span>
+      ${st ? `<span class="pill" style="--pc:${st[1]}">${st[0] === "Waiting for answer" ? (this._isAdmin ? "Sent" : "New") : st[0]}</span>` : ""}</button>`;
+  }
+
+  async _docUsers() {
+    if (!this._users) { try { this._users = await this._hass.callWS({ type: `${DOMAIN}/doc_users`, entry_id: this._entryId }); } catch (e) { this._users = []; } }
+    return this._users;
+  }
+
+  _openDoc(id) { this._docModal = { view: id }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); }
+  async _newDoc(point) {
+    await this._docUsers();
+    this._docModal = { form: { title: "", kind: "quote", amount: "", notes: "", point: point || "", users: [], file: null } };
+    this.$("docmodal").hidden = false; this._renderDocModal();
+  }
+  async _editDoc(id) {
+    const d = this._docs.find((x) => x.id === id); if (!d) return;
+    await this._docUsers();
+    this._docModal = { form: { id: d.id, title: d.title, kind: d.kind, amount: d.amount || "", notes: d.notes || "", point: d.point || "", users: [...(d.users || [])] } };
+    this._renderDocModal();
+  }
+  _closeDoc() { this._docModal = null; this.$("docmodal").hidden = true; this.$("docbody").innerHTML = ""; this.$("docbody")._html = null; }
+
+  _renderDocModal() {
+    const m = this._docModal; if (!m) return;
+    const body = this.$("docbody");
+    if (m.form) {
+      const f = m.form;
+      const targets = [...this._snap.points.map((p) => [p.id, p.name]), ...this._snap.shapes.filter((x) => x.kind !== "sketch").map((x) => [x.id, x.name])];
+      const users = (this._users || []);
+      this._setHTML(body, `<h2>${f.id ? "Edit document" : "Upload a quote or document"}<span class="sub"><button class="iconbtn" data-act="docclose" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <div class="form">
+          ${f.id ? "" : `<div class="field"><label for="df_file">File</label><span class="hint">PDF, JPG or PNG, up to 15 MB</span><input type="file" id="df_file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>`}
+          <div class="field"><label for="df_title">Title</label><input type="text" id="df_title" value="${esc(f.title)}" maxlength="100" placeholder="e.g. Borehole 2 – new 7.5 kW pump"></div>
+          <div class="field inline"><label for="df_kind">Type</label><select id="df_kind" style="width:auto">${Object.entries(DOC_KINDS).map(([k, v]) => `<option value="${k}" ${f.kind === k ? "selected" : ""}>${v[0]}</option>`).join("")}</select></div>
+          <div class="field inline"><label for="df_amount">Amount</label><input type="text" id="df_amount" value="${esc(f.amount)}" maxlength="40" placeholder="R 18 500 incl. VAT" style="max-width:200px"></div>
+          <div class="field inline"><label for="df_point">On the map</label><select id="df_point" style="width:auto;max-width:220px"><option value="">– whole farm –</option>${targets.map(([id, n]) => `<option value="${esc(id)}" ${f.point === id ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div>
+          <div class="field"><label for="df_notes">Note to the client</label><textarea id="df_notes" maxlength="1000" placeholder="Valid 30 days. Includes installation.">${esc(f.notes)}</textarea></div>
+          <div class="field users"><label style="cursor:default">Who may see it</label>
+            ${users.filter((u) => !u.admin).map((u) => `<label><input type="checkbox" data-duser="${esc(u.id)}" ${f.users.includes(u.id) ? "checked" : ""}>${esc(u.name)}</label>`).join("") || `<span class="hint">No other users on this Home Assistant yet – add the client's people in Settings → People.</span>`}
+            <span class="hint">Admins (${users.filter((u) => u.admin).map((u) => esc(u.name)).join(", ") || "–"}) can always see everything.</span></div>
+        </div>
+        <div class="actions"><button class="btn primary" data-act="docsave" id="dsave">${f.id ? "Save" : "Upload"}</button><button class="btn" data-act="docclose">Cancel</button></div>
+        <div class="err" id="derr"></div>`);
+      return;
+    }
+    const d = (this._docs || []).find((x) => x.id === m.view);
+    if (!d) { this._closeDoc(); return; }
+    const [kl, icon] = DOC_KINDS[d.kind] || DOC_KINDS.other;
+    const st = STATUS[d.status] || STATUS.new;
+    const target = d.point ? (this._point(d.point) || this._snap.shapes.find((x) => x.id === d.point)) : null;
+    const isQuote = d.kind === "quote";
+    const names = this._isAdmin ? (d.users || []).map((id) => (this._users || []).find((u) => u.id === id)?.name).filter(Boolean) : [];
+    const conf = (k) => this._confirm === `doc:${d.id}:${k}`;
+    this._setHTML(body, `<h2><ha-icon icon="${icon}" style="color:var(--muted)"></ha-icon>${esc(d.title)}<span class="sub"><button class="iconbtn" data-act="docclose" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+      <div class="kv"><span class="muted">Type</span><span>${esc(kl)}</span></div>
+      ${d.amount ? `<div class="kv"><span class="muted">Amount</span><span><b style="font-weight:500">${esc(d.amount)}</b></span></div>` : ""}
+      ${target ? `<div class="kv"><span class="muted">On the map</span><span><button class="btn" style="padding:2px 10px" data-act="docgoto">${esc(target.name)}</button></span></div>` : ""}
+      <div class="kv"><span class="muted">From</span><span>${esc(d.by || "")} · ${dstr(d.created)}</span></div>
+      ${this._isAdmin ? `<div class="kv"><span class="muted">Shared with</span><span>${names.length ? esc(names.join(", ")) : "only admins"}</span></div>` : ""}
+      ${d.notes ? `<p class="small" style="white-space:pre-wrap">${esc(d.notes)}</p>` : ""}
+      <div class="actions"><button class="btn primary" data-act="docopen"><ha-icon icon="mdi:file-eye-outline"></ha-icon>Open</button></div>
+      ${isQuote ? `<h3>Answer</h3>
+        ${d.status === "new" ? (this._isAdmin ? `<p class="note">Waiting for the client to accept or decline.</p>` : `
+          <div class="field"><label for="dr_note">Comment (optional)</label><textarea id="dr_note" maxlength="1000" placeholder="e.g. Go ahead, any day next week"></textarea></div>
+          <div class="actions">
+            <button class="btn primary" data-act="docaccept" style="${conf("accepted") ? "background:var(--c-ok);border-color:var(--c-ok)" : ""}"><ha-icon icon="mdi:check"></ha-icon>${conf("accepted") ? "Tap again to accept" : "Accept quote"}</button>
+            <button class="btn danger" data-act="docdecline"><ha-icon icon="mdi:close"></ha-icon>${conf("declined") ? "Tap again to decline" : "Decline"}</button></div>`)
+        : `<span class="badge" style="--bc:${st[1]}"><span class="bd"></span>${st[0]} by ${esc(d.status_by || "")}</span>
+           <div class="small muted" style="margin-top:6px">${dstr(d.status_at)}</div>
+           ${d.status_note ? `<p class="small" style="white-space:pre-wrap">“${esc(d.status_note)}”</p>` : ""}`}` : ""}
+      ${this._isAdmin ? `<div class="actions" style="border-top:1px solid var(--line);padding-top:12px">
+        <button class="btn" data-act="docedit"><ha-icon icon="mdi:pencil"></ha-icon>Edit / share</button>
+        ${isQuote && d.status !== "new" ? `<button class="btn" data-act="docreset">Ask again</button>` : ""}
+        <button class="btn danger" data-act="docdel" style="margin-left:auto">${conf("del") ? "Tap again to delete" : "Delete"}</button></div>` : ""}
+      <div class="err" id="derr"></div>`);
+  }
+
+  _readDocForm() {
+    const f = this._docModal.form; const r = this.shadowRoot;
+    f.title = r.getElementById("df_title").value.trim(); f.kind = r.getElementById("df_kind").value; f.amount = r.getElementById("df_amount").value.trim();
+    f.point = r.getElementById("df_point").value; f.notes = r.getElementById("df_notes").value.trim();
+    f.users = [...r.querySelectorAll("[data-duser]")].filter((x) => x.checked).map((x) => x.dataset.duser);
+    const fi = r.getElementById("df_file"); if (fi?.files?.[0]) f.file = fi.files[0];
+  }
+
+  async _saveDoc() {
+    this._readDocForm(); const f = this._docModal.form;
+    const btn = this.$("dsave"); btn.disabled = true; this.$("derr").textContent = "";
+    try {
+      const meta = { title: f.title || (f.file ? f.file.name.replace(/\.[^.]+$/, "") : "Quote"), kind: f.kind, amount: f.amount, notes: f.notes, point: f.point || null, users: f.users };
+      if (f.id) {
+        const r = await this._hass.callWS({ type: `${DOMAIN}/doc_update`, entry_id: this._entryId, doc: { id: f.id, ...meta } });
+        this._docs = r.docs; this._docModal = { view: f.id };
+      } else {
+        if (!f.file) throw new Error("Pick the file to upload");
+        if (f.file.size > 15e6) throw new Error("File too big – 15 MB max");
+        const doc = await this._hass.callWS({ type: `${DOMAIN}/doc_create`, entry_id: this._entryId, doc: { ...meta, filename: f.file.name } });
+        btn.textContent = "Uploading…";
+        const resp = await this._hass.fetchWithAuth(`/api/${DOMAIN}/doc/${this._entryId}/${doc.id}`, { method: "POST", body: f.file, headers: { "Content-Type": "application/octet-stream" } });
+        if (!resp.ok) { let msg = "Upload failed"; try { msg = (await resp.json()).message || msg; } catch (e) { /* ignore */ } throw new Error(msg); }
+        await this._loadDocs();
+        this._docModal = { view: doc.id };
+        this._toast("Uploaded");
+      }
+      this._docsChanged();
+    } catch (e) { this.$("derr").textContent = e.message || String(e); btn.disabled = false; btn.textContent = f.id ? "Save" : "Upload"; }
+  }
+
+  async _viewDoc(d) {
+    const v = this.$("viewer");
+    v.innerHTML = `<div class="vbar"><b>${esc(d.title)}</b><button class="btn" data-act="viewclose"><ha-icon icon="mdi:close"></ha-icon>Close</button></div><div class="vimg"><span style="color:#fff">Opening…</span></div>`;
+    v.hidden = false;
+    try {
+      const resp = await this._hass.fetchWithAuth(`/api/${DOMAIN}/doc/${this._entryId}/${d.id}`);
+      if (!resp.ok) throw new Error(resp.status === 404 ? "Not found, or not shared with you" : `Error ${resp.status}`);
+      const blob = await resp.blob();
+      if (this._viewUrl) URL.revokeObjectURL(this._viewUrl);
+      this._viewUrl = URL.createObjectURL(blob);
+      const ext = blob.type === "application/pdf" ? "pdf" : blob.type === "image/png" ? "png" : "jpg";
+      const fname = `${(d.title || "document").replace(/[^A-Za-z0-9 _-]/g, "").trim() || "document"}.${ext}`;
+      v.innerHTML = `<div class="vbar"><b>${esc(d.title)}</b>
+          <a class="btn" href="${this._viewUrl}" download="${esc(fname)}"><ha-icon icon="mdi:download"></ha-icon>Save</a>
+          <a class="btn" href="${this._viewUrl}" target="_blank" rel="noopener"><ha-icon icon="mdi:open-in-new"></ha-icon>New tab</a>
+          <button class="btn" data-act="viewclose"><ha-icon icon="mdi:close"></ha-icon>Close</button></div>
+        ${blob.type === "application/pdf" ? `<iframe src="${this._viewUrl}" title="${esc(d.title)}"></iframe>` : `<div class="vimg"><img src="${this._viewUrl}" alt="${esc(d.title)}"></div>`}`;
+    } catch (e) { v.querySelector(".vimg").innerHTML = `<span style="color:#fff">${esc(e.message)}</span>`; }
   }
 
   async _loadNotes() {
@@ -1026,9 +1213,9 @@ class HamletFarmPanel extends HTMLElement {
 
   async _click(ev) {
     const path = ev.composedPath();
-    const t = path.find((e) => e instanceof HTMLElement && (e.dataset?.act || e.dataset?.tab || e.dataset?.pt || e.dataset?.filter || e.dataset?.base
-      || e.dataset?.ctl || e.dataset?.pmode || e.dataset?.type || e.dataset?.skind || e.dataset?.toggle
-      || e.dataset?.offarea || e.dataset?.offshow || e.dataset?.offvis || e.dataset?.offdel || e.dataset?.pen || e.dataset?.scolor));
+    const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
+      "pen", "scolor", "more", "notedel", "photo", "doc"];
+    const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
     if (ds.tab) { if (ds.tab !== this._entryId) this._selectFarm(ds.tab); return; }
@@ -1040,6 +1227,7 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.doc) { this._openDoc(ds.doc); return; }
     if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }
     if (ds.more && !path.some((e) => e.dataset?.toggle)) { this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: ds.more }, bubbles: true, composed: true })); return; }
     if (ds.notedel) {
@@ -1110,6 +1298,38 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "pendone": this._stopPen(); this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "docnew": this._newDoc(ds.docpoint); break;
+      case "docclose": this._closeDoc(); break;
+      case "docsave": this._saveDoc(); break;
+      case "docedit": this._editDoc(this._docModal.view); break;
+      case "docopen": { const d = this._docs.find((x) => x.id === this._docModal.view); if (d) this._viewDoc(d); break; }
+      case "viewclose": { const v = this.$("viewer"); v.hidden = true; v.innerHTML = ""; if (this._viewUrl) { URL.revokeObjectURL(this._viewUrl); this._viewUrl = null; } break; }
+      case "docgoto": {
+        const d = this._docs.find((x) => x.id === this._docModal.view); this._closeDoc();
+        if (d?.point) { const p = this._point(d.point); if (p) { this._fm.flyTo(p); this._openPage("point", p.id); } else this._openPage("shape", d.point); }
+        break;
+      }
+      case "docaccept": case "docdecline": {
+        const ans = ds.act === "docaccept" ? "accepted" : "declined"; const id = this._docModal.view; const key = `doc:${id}:${ans}`;
+        const note = this.$("dr_note")?.value || "";
+        if (this._confirm !== key) { this._confirm = key; this._renderDocModal(); if (this.$("dr_note")) this.$("dr_note").value = note; return; }
+        this._confirm = null;
+        try { const r = await this._hass.callWS({ type: `${DOMAIN}/doc_respond`, entry_id: this._entryId, doc_id: id, answer: ans, note }); this._docs = r.docs; this._docsChanged(); this._toast(ans === "accepted" ? "Quote accepted – thank you" : "Quote declined"); }
+        catch (e) { this.$("derr").textContent = e.message; }
+        break;
+      }
+      case "docreset":
+        try { const r = await this._hass.callWS({ type: `${DOMAIN}/doc_update`, entry_id: this._entryId, doc: { id: this._docModal.view, reset_status: true } }); this._docs = r.docs; this._docsChanged(); }
+        catch (e) { this.$("derr").textContent = e.message; }
+        break;
+      case "docdel": {
+        const id = this._docModal.view; const key = `doc:${id}:del`;
+        if (this._confirm !== key) { this._confirm = key; this._renderDocModal(); return; }
+        this._confirm = null;
+        try { const r = await this._hass.callWS({ type: `${DOMAIN}/doc_delete`, entry_id: this._entryId, doc_id: id }); this._docs = r.docs; this._closeDoc(); this._docsChanged(); this._toast("Deleted"); }
+        catch (e) { this.$("derr").textContent = e.message; }
+        break;
+      }
       case "noteadd": this._noteAdd(); break;
       case "notephotox": if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url); this._notePhoto = null; this.$("npv").innerHTML = ""; break;
       case "editshape": {
