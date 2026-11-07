@@ -306,6 +306,12 @@ class FarmController:
         self._changed()
 
     # ------------------------------------------------------------ notes / site log
+    def _bg(self, fn, *args) -> None:
+        """Run blocking file work in the background (tracked, so it finishes before Home Assistant stops)."""
+        async def run() -> None:
+            await self.hass.async_add_executor_job(fn, *args)
+        self.hass.async_create_task(run())
+
     def _photo_ids(self) -> set[str]:
         return {n["photo"] for lst in self.notes.values() for n in lst if n.get("photo")}
 
@@ -333,7 +339,7 @@ class FarmController:
         dropped = lst[:-300]
         self.notes[target] = lst[-300:]
         if dropped:
-            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id,
+            self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id,
                                              [n["photo"] for n in dropped if n.get("photo")])
         self._save()
         self._recompute()
@@ -348,7 +354,7 @@ class FarmController:
             raise PermissionError("Only an admin or the person who wrote it can delete a note")
         lst.remove(note)
         if note.get("photo"):
-            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id, [note["photo"]])
+            self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id, [note["photo"]])
         self._save()
         self._recompute()
 
@@ -448,7 +454,7 @@ class FarmController:
         gone = self.notes.pop(target, [])
         photos = [n["photo"] for n in gone if n.get("photo")]
         if photos:
-            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id, photos)
+            self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id, photos)
 
     def save_view(self, raw: dict) -> None:
         self.view = logic.clean_view(raw)
