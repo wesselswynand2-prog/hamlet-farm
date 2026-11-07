@@ -271,6 +271,13 @@ export class FarmMap {
     this.pivots.set(p.id, g);
   }
 
+  // a tap on a line / drawing / land; while measuring or placing (passThrough) the tap goes to the map instead
+  _shapeHit(e, id) {
+    if (this.passThrough) return;
+    this.L.DomEvent.stopPropagation(e);
+    this.cb.onShapeClick && this.cb.onShapeClick(id);
+  }
+
   _shapes(shapes) {
     const L = this.L;
     const seen = new Set();
@@ -291,16 +298,16 @@ export class FarmMap {
         const casing = L.polyline(s.coords, { color: color === "#000000" ? "#fff" : "#000", weight: d.weight + 2, opacity: 0.3, interactive: false, lineCap: "round", lineJoin: "round" });
         const line = L.polyline(s.coords, opts);
         layer = L.layerGroup([casing, line]);
-        line.on("click", (e) => { if (this.editing) { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); } });
+        line.on("click", (e) => this._shapeHit(e, s.id));
       } else {
         // dark casing underneath so lines read on satellite imagery
         const casing = L.polyline(s.coords, { color: "#000", weight: d.weight + 2.5, opacity: 0.35, interactive: false });
         const line = L.polyline(s.coords, opts);
         line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
         layer = L.layerGroup([casing, line]);
-        line.on("click", (e) => { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); });
+        line.on("click", (e) => this._shapeHit(e, s.id));
       }
-      if (s.kind === "field") layer.on("click", (e) => { if (this.editing) { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); } });
+      if (s.kind === "field") layer.on("click", (e) => this._shapeHit(e, s.id));
       layer._key = key + (s.color || "");
       layer.addTo(this.shapeLayer);
       this.shapes.set(s.id, layer);

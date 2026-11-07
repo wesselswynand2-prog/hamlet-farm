@@ -206,3 +206,59 @@ async def test_offline_upload_admin_only(hass: HomeAssistant, hass_ws_client, ha
     ro = await hass_client(hass_read_only_access_token)
     resp = await ro.post(f"/api/hamlet_farm/upload/{entry.entry_id}/{lid}", json={"tiles": []})
     assert resp.status == 403
+
+
+async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client, hass_client_no_auth, hass_read_only_access_token):
+    import base64
+    import os
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/save_point", "entry_id": entry.entry_id,
+                        "point": {"name": "Borehole 1", "type": "pump", "lat": -25.7, "lng": 28.2}})
+    pid = (await _reply(ws, 1))["result"]["result"]["id"]
+
+    client = await hass_client()
+    resp = await client.post(f"/api/hamlet_farm/photo/{entry.entry_id}", data=base64.b64decode(_jpeg()))
+    assert resp.status == 200, await resp.text()
+    photo = (await resp.json())["photo"]
+    resp = await client.post(f"/api/hamlet_farm/photo/{entry.entry_id}", data=b"not a jpeg")
+    assert resp.status == 400
+
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": pid,
+                        "text": "Replaced the pressure switch", "photo": photo})
+    r = await _reply(ws, 2)
+    assert r["success"], r
+    note = r["result"]["note"]
+    assert note["user"] and note["photo"] == photo
+    await ws.send_json({"id": 3, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": "nope", "text": "x"})
+    assert not (await _reply(ws, 3))["success"]
+    await ws.send_json({"id": 4, "type": f"{DOMAIN}/state", "entry_id": entry.entry_id})
+    st = (await _reply(ws, 4))["result"]
+    assert st["note_counts"] == {pid: 1}
+
+    anon = await hass_client_no_auth()
+    resp = await anon.get(f"{st['photo_url']}/{photo}")
+    assert resp.status == 200 and resp.content_type == "image/jpeg"
+    resp = await anon.get(f"/api/hamlet_farm/photos/wrong/{photo}")
+    assert resp.status == 404
+
+    # a read-only (non-admin) user can add notes but not delete someone else's
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": pid, "text": "Checked, all OK"})
+    r = await _reply(ro, 1)
+    assert r["success"]
+    mine = r["result"]["note"]["id"]
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/note_delete", "entry_id": entry.entry_id, "target": pid, "note_id": note["id"]})
+    r = await _reply(ro, 2)
+    assert not r["success"] and r["error"]["code"] == "unauthorized"
+    await ro.send_json({"id": 3, "type": f"{DOMAIN}/note_delete", "entry_id": entry.entry_id, "target": pid, "note_id": mine})
+    assert (await _reply(ro, 3))["success"]
+
+    # deleting the point removes its notes and photos
+    path = hass.config.path("hamlet_farm", entry.entry_id, "photos", f"{photo}.jpg")
+    assert os.path.exists(path)
+    await ws.send_json({"id": 5, "type": f"{DOMAIN}/delete_point", "entry_id": entry.entry_id, "point_id": pid})
+    assert (await _reply(ws, 5))["success"]
+    await hass.async_block_till_done()
+    assert not os.path.exists(path)
+    assert hass.data[DOMAIN][entry.entry_id].notes == {}

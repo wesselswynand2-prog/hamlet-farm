@@ -17,7 +17,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import logic, offline
+from . import logic, notes as notes_mod, offline
 from .const import CONF_NAME, DOMAIN, MAX_EVENTS, PUSH_DEBOUNCE_S, SIGNAL_UPDATE, STORE_VERSION, TICK_S
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class FarmController:
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.events: list[dict] = []
         self.energy_base: dict[str, Any] = {"date": None, "base": {}}
+        self.notes: dict[str, list[dict]] = {}
         self.offline: list[dict] = []
         self.tile_token: str = ""
         self.statuses: dict[str, dict] = {}
@@ -64,6 +65,8 @@ class FarmController:
         self.energy_base = data.get("energy_base") or {"date": None, "base": {}}
         self._alerted = set(data.get("alerted") or [])
         self.tile_token = data.get("tile_token") or secrets.token_urlsafe(18)
+        self.notes = {k: v for k, v in (data.get("notes") or {}).items() if isinstance(v, list)}
+        await self.hass.async_add_executor_job(notes_mod.clean_orphans, self.hass, self.entry.entry_id, self._photo_ids())
         self.offline = []
         for layer in data.get("offline") or []:
             if layer.get("status") == "ready":
@@ -102,7 +105,7 @@ class FarmController:
         return {
             "points": self.points, "shapes": self.shapes, "view": self.view, "settings": self.settings,
             "events": self.events[-MAX_EVENTS:], "energy_base": self.energy_base, "alerted": sorted(self._alerted),
-            "tile_token": self.tile_token, "offline": self.offline,
+            "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes,
         }
 
     def _save(self) -> None:
@@ -281,6 +284,7 @@ class FarmController:
 
     def delete_point(self, pid: str) -> None:
         self.points = [p for p in self.points if p["id"] != pid]
+        self._drop_notes(pid)
         self._changed()
 
     def save_shape(self, raw: dict) -> dict:
@@ -296,7 +300,61 @@ class FarmController:
 
     def delete_shape(self, sid: str) -> None:
         self.shapes = [s for s in self.shapes if s["id"] != sid]
+        self._drop_notes(sid)
         self._changed()
+
+    # ------------------------------------------------------------ notes / site log
+    def _photo_ids(self) -> set[str]:
+        return {n["photo"] for lst in self.notes.values() for n in lst if n.get("photo")}
+
+    def photo_known(self, photo_id: str) -> bool:
+        return photo_id in self._photo_ids()
+
+    def _target_exists(self, target: str) -> bool:
+        return any(p["id"] == target for p in self.points) or any(s["id"] == target for s in self.shapes)
+
+    def notes_for(self, target: str) -> list[dict]:
+        return list(reversed(self.notes.get(target, [])))
+
+    def note_add(self, target: str, text: str, user, photo: str | None = None) -> dict:
+        if not self._target_exists(target):
+            raise ValueError("That point is not on the map any more")
+        text = str(text or "").strip()[:2000]
+        if photo is not None and not notes_mod.PHOTO_ID.match(str(photo)):
+            raise ValueError("bad photo")
+        if not text and not photo:
+            raise ValueError("Write a note or add a photo")
+        note = {"id": logic.new_id(), "t": dt_util.now().isoformat(), "text": text, "photo": photo,
+                "user_id": user.id if user else None, "user": (user.name if user else None) or "Someone"}
+        lst = self.notes.setdefault(target, [])
+        lst.append(note)
+        dropped = lst[:-300]
+        self.notes[target] = lst[-300:]
+        if dropped:
+            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id,
+                                             [n["photo"] for n in dropped if n.get("photo")])
+        self._save()
+        self._recompute()
+        return note
+
+    def note_delete(self, target: str, note_id: str, user) -> None:
+        lst = self.notes.get(target, [])
+        note = next((n for n in lst if n["id"] == note_id), None)
+        if note is None:
+            raise ValueError("Note not found")
+        if not (user and (user.is_admin or user.id == note.get("user_id"))):
+            raise PermissionError("Only an admin or the person who wrote it can delete a note")
+        lst.remove(note)
+        if note.get("photo"):
+            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id, [note["photo"]])
+        self._save()
+        self._recompute()
+
+    def _drop_notes(self, target: str) -> None:
+        gone = self.notes.pop(target, [])
+        photos = [n["photo"] for n in gone if n.get("photo")]
+        if photos:
+            self.hass.async_add_executor_job(notes_mod.delete_photos, self.hass, self.entry.entry_id, photos)
 
     def save_view(self, raw: dict) -> None:
         self.view = logic.clean_view(raw)
@@ -393,4 +451,6 @@ class FarmController:
             "events": list(reversed(self.events[-10:])),
             "offline": [x for x in self.offline if x.get("status") == "ready"],
             "tile_url": f"/api/hamlet_farm/tiles/{self.tile_token}",
+            "photo_url": f"/api/hamlet_farm/photos/{self.tile_token}",
+            "note_counts": {k: len(v) for k, v in self.notes.items() if v},
         }

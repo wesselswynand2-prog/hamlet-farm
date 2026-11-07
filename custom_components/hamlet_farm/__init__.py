@@ -15,6 +15,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, PANEL_COMPONENT, PANEL_URL_PATH, STATIC_URL, VERSION
 from .controller import FarmController
+from .notes import PhotoUploadView, PhotoView
 from .offline import OfflineTileView, OfflineUploadView, remove_tree, root_dir
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     if not data.get("_views"):
         hass.http.register_view(OfflineUploadView())
         hass.http.register_view(OfflineTileView())
+        hass.http.register_view(PhotoUploadView())
+        hass.http.register_view(PhotoView())
         data["_views"] = True
     if not data.get("_static"):
         await hass.http.async_register_static_paths(
@@ -108,7 +111,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
-                    ws_offline_visible, ws_offline_delete):
+                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete):
         websocket_api.async_register_command(hass, handler)
 
 
@@ -185,3 +188,41 @@ async def ws_offline_delete(hass, connection, msg):
             connection.send_error(msg["id"], "invalid", str(err))
             return
         connection.send_result(msg["id"], {"result": None, **controller.snapshot()})
+
+
+# ------------------------------------------------------------------ notes (any logged-in user)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/notes", vol.Required("entry_id"): str, vol.Required("target"): str})
+@callback
+def ws_notes(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        connection.send_result(msg["id"], {"notes": controller.notes_for(msg["target"]), "user_id": connection.user.id,
+                                           "is_admin": connection.user.is_admin})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/note_add", vol.Required("entry_id"): str, vol.Required("target"): str,
+                                  vol.Optional("text", default=""): str, vol.Optional("photo"): vol.Any(str, None)})
+@callback
+def ws_note_add(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            note = controller.note_add(msg["target"], msg["text"], connection.user, msg.get("photo"))
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"note": note, "notes": controller.notes_for(msg["target"])})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/note_delete", vol.Required("entry_id"): str,
+                                  vol.Required("target"): str, vol.Required("note_id"): str})
+@callback
+def ws_note_delete(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            controller.note_delete(msg["target"], msg["note_id"], connection.user)
+        except PermissionError as err:
+            connection.send_error(msg["id"], "unauthorized", str(err))
+            return
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"notes": controller.notes_for(msg["target"])})

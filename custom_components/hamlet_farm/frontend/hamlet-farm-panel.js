@@ -152,6 +152,34 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .note { font-size: 13px; color: var(--muted); line-height: 1.45; }
 .note a { color: var(--accent); }
 
+/* point page ("next screen") */
+.body { position: relative; }
+.page { position: absolute; inset: 0; z-index: 1100; overflow-y: auto; background: var(--primary-background-color); }
+@media (max-width: 899px) { .page { position: fixed; inset: 0; z-index: 1200; } }
+.pgwrap { max-width: 1180px; margin: 0 auto; padding: var(--gap); display: flex; flex-direction: column; gap: var(--gap); }
+.pghead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pghead .dot { width: 48px; height: 48px; } .pghead .dot ha-icon { --mdc-icon-size: 28px; }
+.pghead .t { flex: 1; min-width: 160px; } .pghead .t b { display: block; font-size: 22px; font-weight: 500; } .pghead .t span { color: var(--muted); font-size: 14px; }
+.pggrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.pggrid .col { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+@media (max-width: 899px) { .pggrid { grid-template-columns: 1fr; } }
+.erow { cursor: pointer; } .erow:hover span:first-child { color: var(--accent); }
+.composer textarea { min-height: 70px; }
+.composer .prev { position: relative; display: inline-block; margin-top: 8px; }
+.composer .prev img { max-height: 120px; border-radius: 8px; display: block; }
+.composer .prev button { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 50%; width: 26px; height: 26px; cursor: pointer; }
+.note { display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.note:last-child { border-bottom: 0; }
+.av { width: 34px; height: 34px; border-radius: 50%; flex: none; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 14px; }
+.note .nb { flex: 1; min-width: 0; } .note .who { font-size: 14px; } .note .who b { font-weight: 500; } .note .who span { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.note p { margin: 4px 0 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note img { margin-top: 8px; max-width: 100%; max-height: 260px; border-radius: 8px; cursor: zoom-in; display: block; }
+.ncount { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); margin-left: 6px; }
+.ncount ha-icon { --mdc-icon-size: 14px; }
+.lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 20px; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+
 /* events */
 .ev { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .ev:last-child { border-bottom: 0; }
@@ -198,7 +226,8 @@ class HamletFarmPanel extends HTMLElement {
     this._hass = hass;
     if (this._menuBtn) this._menuBtn.hass = hass;
     if (first) this._init();
-    else if (this._snap && this._sel && !this._draft) this._renderSide();   // live entity values in the details card
+    else if (this._snap && this._page) this._renderPage();   // live entity values on the point page
+    if (this._pumpCard) this._pumpCard.hass = hass;
   }
   get hass() { return this._hass; }
   set narrow(v) { this._narrow = v; if (this._menuBtn) this._menuBtn.narrow = v; }
@@ -231,13 +260,16 @@ class HamletFarmPanel extends HTMLElement {
             <div class="toast" id="toast" hidden></div>
           </div>
           <div class="side" id="side"><div class="card loading">Loading…</div></div>
+          <div class="page" id="page" hidden></div>
         </div>
+        <div class="lightbox" id="lightbox" hidden><img alt=""></div>
       </div>`;
     const mb = document.createElement("ha-menu-button");
     mb.hass = this._hass; mb.narrow = this._narrow;
     root.getElementById("menu").appendChild(mb);
     this._menuBtn = mb;
     root.addEventListener("click", (ev) => this._click(ev));
+    root.getElementById("lightbox").addEventListener("click", (ev) => { ev.currentTarget.hidden = true; });
     root.addEventListener("input", (ev) => this._input(ev));
     root.addEventListener("change", (ev) => this._input(ev));
     root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._search(); });
@@ -264,7 +296,7 @@ class HamletFarmPanel extends HTMLElement {
     this._fm.setLabels(this._labels);
     await this._selectFarm(this._entries.some((e) => e.entry_id === saved) ? saved : this._entries[0].entry_id);
     const want = new URLSearchParams(location.search).get("point");
-    if (want && this._point(want)) { this._select(want); this._fm.flyTo(this._point(want)); }
+    if (want && this._point(want)) { this._fm.flyTo(this._point(want)); this._openPage("point", want); }
   }
 
   _renderTabs() {
@@ -307,6 +339,7 @@ class HamletFarmPanel extends HTMLElement {
     if (this._sel && !this._point(this._sel)) this._sel = null;
     this._fm.setSelected(this._sel);
     if (!this._draft && !this._typing() && !this._off) this._renderSide();
+    if (this._page) { if (this._pageTarget()) this._renderPage(); else this._closePage(); }
     this._renderBanner();
   }
 
@@ -368,6 +401,7 @@ class HamletFarmPanel extends HTMLElement {
     }
     this._setHTML(this.$("banner"), html);
     this._fm?.setEditing(this._edit);
+    if (this._fm) this._fm.passThrough = !!(this._measure || this._placing || this._draw || this._pen);
   }
 
   /* ------------------------------------------------------------ side panel */
@@ -375,7 +409,6 @@ class HamletFarmPanel extends HTMLElement {
     if (!this._snap) return;
     if (this._off) return this._renderOffline();
     if (this._draft) return this._renderEditor();
-    if (this._sel) return this._renderDetails();
     this._renderOverview();
   }
 
@@ -587,11 +620,10 @@ class HamletFarmPanel extends HTMLElement {
     const st = this._st(p.id); const cls = st.cls || "info";
     const val = shortValue(p, st);
     return `<button class="row" data-pt="${esc(p.id)}"><span class="dot ${cls}" style="--mc:${clsColor(cls, p.type)}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
-      <span class="nm"><div>${esc(p.name)}</div><div class="st ${cls}">${esc(st.status || TYPES[p.type]?.label || "")}</div></span><span class="val">${esc(val)}</span></button>`;
+      <span class="nm"><div>${esc(p.name)}${this._snap.note_counts?.[p.id] ? `<span class="ncount"><ha-icon icon="mdi:note-text-outline"></ha-icon>${this._snap.note_counts[p.id]}</span>` : ""}</div><div class="st ${cls}">${esc(st.status || TYPES[p.type]?.label || "")}</div></span><span class="val">${esc(val)}</span></button>`;
   }
 
-  _renderDetails() {
-    const p = this._point(this._sel); if (!p) return;
+  _renderPointPage(p) {
     const st = this._st(p.id); const v = st.values || {}; const cls = st.cls || "info";
     const color = clsColor(cls, p.type);
     const ent = p.entities || {};
@@ -614,7 +646,7 @@ class HamletFarmPanel extends HTMLElement {
       const dom = e.split(".")[0];
       const val = so ? `${esc(H.formatEntityState ? H.formatEntityState(so) : `${so.state} ${so.attributes.unit_of_measurement || ""}`)}` : `<span class="muted">not found</span>`;
       const tog = ["switch", "input_boolean", "light"].includes(dom) && so ? ` <button class="btn" style="padding:2px 10px" data-toggle="${esc(e)}">${so.state === "on" ? "Turn off" : "Turn on"}</button>` : "";
-      rows.push(`<div class="kv"><span class="muted">${name}</span><span>${val}${tog}</span></div>`);
+      rows.push(`<div class="kv erow" data-more="${esc(e)}"><span class="muted">${name}</span><span>${val}${tog}</span></div>`);
     }
     // controls
     let ctl = "";
@@ -635,25 +667,166 @@ class HamletFarmPanel extends HTMLElement {
       ctl = `<div class="ctl">${b("on", onI, onL, !!isOn)}${b("off", offI, offL, so ? !isOn : false)}</div>
         ${so ? "" : `<div class="err">${esc(ent.control)} not found</div>`}`;
     }
+    // the mapped entities: tap one for Home Assistant's history graph
+    const entRows = Object.entries(ent).map(([k, e]) => {
+      const so = H.states[e];
+      const val = so ? esc(H.formatEntityState ? H.formatEntityState(so) : `${so.state} ${so.attributes.unit_of_measurement || ""}`) : `<span class="muted">not found</span>`;
+      return `<div class="kv erow" data-more="${esc(e)}"><span class="muted">${esc(ROLES[k]?.label || k)}<br><small>${esc(so?.attributes?.friendly_name || e)}</small></span><span>${val}</span></div>`;
+    });
     const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
-    this._setHTML(this.$("side"), `
-      <section class="card">
-        <div class="dhead"><span class="dot ${cls}" style="--mc:${color}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
-          <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
-          <button class="iconbtn" data-act="close" aria-label="Back to the list"><ha-icon icon="mdi:close"></ha-icon></button></div>
-        ${st.status ? `<span class="badge ${st.running ? "pulse" : ""}" style="--bc:${cls === "info" ? "var(--muted)" : color}"><span class="bd"></span>${esc(st.status)}</span>` : ""}
+    this._setHTML(this.$("pg-head"), `
+      <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
+      <span class="dot ${cls}" style="--mc:${color}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
+      <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
+      <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
+      ${p.pump_entry ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pumps page</button>` : ""}
+      ${this._isAdmin ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+    this._setHTML(this.$("pg-now"), `<h2>Now</h2>
+        ${st.status ? `<span class="badge ${st.running ? "pulse" : ""}" style="--bc:${cls === "info" ? "var(--muted)" : color}"><span class="bd"></span>${esc(st.status)}</span>` : `<p class="note">Nothing linked yet${this._isAdmin ? " – tap Edit to link the pump, pivot or meter" : ""}.</p>`}
         ${v.pump_reason ? `<div class="reason">${esc(v.pump_reason)}</div>` : ""}
         ${ctl}
         ${rows.length ? `<div style="margin-top:14px">${rows.join("")}</div>` : ""}
-        ${cams.join("")}
-        ${p.notes ? `<p class="small" style="white-space:pre-wrap;margin:12px 0 0">${esc(p.notes)}</p>` : ""}
-        <div class="actions">
-          <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
-          ${p.pump_entry ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pump page</button>` : ""}
-          ${this._isAdmin ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}
-        </div>
-        <div class="small muted" style="margin-top:10px">GPS ${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</div>
-      </section>`);
+        ${cams.join("")}`);
+    this._setHTML(this.$("pg-info"), `<h2>About</h2>
+        ${p.notes ? `<p class="small" style="white-space:pre-wrap;margin:0 0 10px">${esc(p.notes)}</p>` : ""}
+        ${entRows.length ? `<h3>Linked to</h3>${entRows.join("")}<div class="small muted" style="margin-top:6px">Tap one to see its history.</div>` : ""}
+        <div class="kv"><span class="muted">GPS</span><span>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span></div>`);
+  }
+
+  _renderShapePage(sh) {
+    const d = SHAPES[sh.kind] || SHAPES.pipe;
+    const color = sh.kind === "sketch" && sh.color ? sh.color : d.color;
+    const closed = sh.kind === "field";
+    this._setHTML(this.$("pg-head"), `
+      <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
+      <span class="dot" style="--mc:${color};border:1px solid var(--line)"><ha-icon icon="${closed ? "mdi:vector-square" : sh.kind === "sketch" ? "mdi:draw" : "mdi:vector-polyline"}" style="color:${color === "#ffffff" || color === "#ffcc00" ? "#333" : "#fff"}"></ha-icon></span>
+      <div class="t"><b>${esc(sh.name)}</b><span>${esc(d.label)}</span></div>
+      ${this._isAdmin ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+    this._setHTML(this.$("pg-now"), `<h2>Size</h2>
+      ${closed ? `<div class="kv"><span class="muted">Area</span><span>${fmtArea(areaM2(sh.coords))}</span></div>
+        <div class="kv"><span class="muted">Distance round</span><span>${fmtDist(lineLength([...sh.coords, sh.coords[0]]))}</span></div>`
+        : `<div class="kv"><span class="muted">Length</span><span>${fmtDist(lineLength(sh.coords))}</span></div>`}
+      <div class="kv"><span class="muted">Corners</span><span>${sh.coords.length}</span></div>`);
+    this._setHTML(this.$("pg-info"), "");
+    this.$("pg-info").hidden = true;
+  }
+
+  /* ------------------------------------------------------------ point page */
+  _pageTarget() {
+    const pg = this._page; if (!pg || !this._snap) return null;
+    return pg.kind === "point" ? this._point(pg.id) : this._snap.shapes.find((x) => x.id === pg.id);
+  }
+
+  _openPage(kind, id) {
+    this._page = { kind, id, notes: null };
+    this._sel = kind === "point" ? id : null; this._fm.setSelected(this._sel); this._confirm = null;
+    const el = this.$("page");
+    el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
+      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-pump"></div><section class="card" id="pg-info"></section></div>
+        <div class="col"><section class="card" id="pg-log"><h2>Site log<span class="sub" id="pg-count"></span></h2>
+          <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
+            <div id="npv"></div>
+            <div class="actions" style="margin-top:8px">
+              <label class="btn"><input type="file" id="np" accept="image/*" hidden><ha-icon icon="mdi:camera"></ha-icon>Photo</label>
+              <button class="btn primary" data-act="noteadd" id="nadd"><ha-icon icon="mdi:send"></ha-icon>Add note</button></div>
+            <div class="err" id="nerr"></div></div>
+          <div id="pg-notes"><div class="note"><span class="muted small">Loading…</span></div></div></section></div></div></div>`;
+    el.hidden = false; el.scrollTop = 0;
+    this._pumpCard = null;
+    const t = this._pageTarget();
+    if (kind === "point" && t?.pump_entry) this._mountPumpCard(t.pump_entry);
+    this._renderPage();
+    this._loadNotes();
+  }
+
+  _rerender() { if (this._page) this._renderPage(); else this._renderSide(); }
+
+  _closePage() {
+    const pg = this._page; this._page = null; this._pumpCard = null; this._notePhoto = null;
+    const el = this.$("page"); el.hidden = true; el.innerHTML = "";
+    if (pg?.kind === "point" && this._point(pg.id)) { this._fm.flyTo(this._point(pg.id)); this._fm.setSelected(pg.id); }
+    this._sel = null;
+    this._fm.map.invalidateSize();
+  }
+
+  async _mountPumpCard(pumpEntry) {
+    const box = this.$("pg-pump"); if (!box) return;
+    try {
+      if (!customElements.get("hamlet-pump-card")) await import("/hamlet_pump_static/hamlet-pump-card.js");
+    } catch (e) { return; }   // Hamlet Pump not installed
+    if (!this._page) return;
+    const c = document.createElement("hamlet-pump-card");
+    c.setConfig({ type: "custom:hamlet-pump-card", pump: pumpEntry });
+    c.hass = this._hass;
+    box.replaceChildren(c);
+    this._pumpCard = c;
+  }
+
+  _renderPage() {
+    const t = this._pageTarget(); if (!t || !this.$("pg-head")) return;
+    if (this._page.kind === "point") this._renderPointPage(t); else this._renderShapePage(t);
+  }
+
+  async _loadNotes() {
+    const pg = this._page; if (!pg) return;
+    try {
+      const r = await this._hass.callWS({ type: `${DOMAIN}/notes`, entry_id: this._entryId, target: pg.id });
+      if (this._page !== pg) return;
+      Object.assign(pg, { notes: r.notes, me: r.user_id, admin: r.is_admin });
+    } catch (e) { pg.notes = []; this.$("nerr").textContent = e.message; }
+    this._renderNotes();
+  }
+
+  _renderNotes() {
+    const pg = this._page; if (!pg || !this.$("pg-notes")) return;
+    const notes = pg.notes || [];
+    this.$("pg-count").textContent = notes.length ? `${notes.length} note${notes.length > 1 ? "s" : ""}` : "";
+    const photo = (id) => `${this._snap.photo_url}/${encodeURIComponent(id)}`;
+    this._setHTML(this.$("pg-notes"), notes.length ? notes.map((n) => {
+      const mine = pg.admin || (pg.me && n.user_id === pg.me);
+      const conf = this._confirm === `note:${n.id}`;
+      return `<div class="note"><span class="av">${esc((n.user || "?").trim().charAt(0).toUpperCase())}</span>
+        <div class="nb"><div class="who"><b>${esc(n.user || "Someone")}</b><span>${dstr(n.t)}</span></div>
+          ${n.text ? `<p>${esc(n.text)}</p>` : ""}
+          ${n.photo ? `<img src="${photo(n.photo)}" alt="Photo" loading="lazy" data-photo="${photo(n.photo)}">` : ""}</div>
+        ${mine ? `<button class="iconbtn" data-notedel="${esc(n.id)}" title="${conf ? "Tap again to delete" : "Delete"}" style="${conf ? "color:var(--c-bad)" : ""}"><ha-icon icon="${conf ? "mdi:delete-alert" : "mdi:delete-outline"}"></ha-icon></button>` : ""}</div>`;
+    }).join("") : `<div class="empty">No notes yet. Add what was done here, with a photo if you like – everyone sees it next time.</div>`);
+  }
+
+  async _notePhotoPicked(file) {
+    try {
+      const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+      cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+      const blob = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.82));
+      if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url);
+      this._notePhoto = { blob, url: URL.createObjectURL(blob) };
+      this.$("npv").innerHTML = `<span class="prev"><img src="${this._notePhoto.url}" alt="Photo to add"><button data-act="notephotox" aria-label="Remove photo">×</button></span>`;
+    } catch (e) { this.$("nerr").textContent = "Could not read that photo"; }
+  }
+
+  async _noteAdd() {
+    const pg = this._page; if (!pg) return;
+    const text = this.$("nt").value.trim();
+    if (!text && !this._notePhoto) { this.$("nerr").textContent = "Write a note or add a photo"; return; }
+    const btn = this.$("nadd"); btn.disabled = true; this.$("nerr").textContent = "";
+    try {
+      let photo = null;
+      if (this._notePhoto) {
+        const resp = await this._hass.fetchWithAuth(`/api/${DOMAIN}/photo/${this._entryId}`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: this._notePhoto.blob });
+        const j = await resp.json();
+        if (!resp.ok) throw new Error(j.message || "Photo upload failed");
+        photo = j.photo;
+      }
+      const r = await this._hass.callWS({ type: `${DOMAIN}/note_add`, entry_id: this._entryId, target: pg.id, text, ...(photo ? { photo } : {}) });
+      if (this._page !== pg) return;
+      pg.notes = r.notes; this.$("nt").value = ""; this.$("npv").innerHTML = "";
+      if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url);
+      this._notePhoto = null;
+      this._renderNotes();
+    } catch (e) { this.$("nerr").textContent = e.message || String(e); }
+    btn.disabled = false;
   }
 
   /* ------------------------------------------------------------ editor */
@@ -753,10 +926,8 @@ class HamletFarmPanel extends HTMLElement {
     if (this._measure) { const p = this._point(id); if (p) this._mapClick({ lat: p.lat, lng: p.lng }); return; }
     if (this._draw || this._placing || this._pen) return;
     if (this._edit && this._isAdmin) { this._openEditor(id); return; }
-    this._sel = id; this._confirm = null; this._draft = null;
-    this._fm.setSelected(id);
-    this._renderSide();
-    if (this._narrow || innerWidth < 900) this.$("side").scrollIntoView?.({ behavior: "smooth", block: "start" });
+    this._draft = null;
+    this._openPage("point", id);
   }
 
   _openEditor(id) {
@@ -791,7 +962,8 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   _shapeClick(id) {
-    if (!this._edit || this._draw || this._placing || this._measure || this._pen) return;
+    if (this._draw || this._placing || this._measure || this._pen) return;
+    if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
     this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color };
@@ -842,6 +1014,7 @@ class HamletFarmPanel extends HTMLElement {
   _input(ev) {
     const el = ev.composedPath()[0];
     if (el?.id === "offfile" && ev.type === "change" && el.files?.[0]) { this._offOpen(el.files[0]); return; }
+    if (el?.id === "np" && ev.type === "change" && el.files?.[0]) { this._notePhotoPicked(el.files[0]); el.value = ""; return; }
     if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
     if ((el?.id === "offname" || el?.id === "offsrc") && this._off) { this._off[el.id === "offname" ? "name" : "credit"] = el.value; return; }
     if (!this._draft || !el?.id) return;
@@ -859,7 +1032,7 @@ class HamletFarmPanel extends HTMLElement {
     if (!t) return;
     const ds = t.dataset;
     if (ds.tab) { if (ds.tab !== this._entryId) this._selectFarm(ds.tab); return; }
-    if (ds.pt) { const p = this._point(ds.pt); this._select(ds.pt); if (p) this._fm.flyTo(p); return; }
+    if (ds.pt) { const p = this._point(ds.pt); if (p) this._fm.flyTo(p); this._select(ds.pt); return; }
     if (ds.filter) { this._filter = ds.filter; this._renderSide(); return; }
     if (ds.base) {
       this._baseOverride = ds.base; try { localStorage.setItem("hamlet_farm_base", ds.base); } catch (e) { /* ignore */ }
@@ -867,6 +1040,18 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }
+    if (ds.more && !path.some((e) => e.dataset?.toggle)) { this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: ds.more }, bubbles: true, composed: true })); return; }
+    if (ds.notedel) {
+      const key = `note:${ds.notedel}`;
+      if (this._confirm !== key) { this._confirm = key; this._renderNotes(); return; }
+      this._confirm = null;
+      try {
+        const r = await this._hass.callWS({ type: `${DOMAIN}/note_delete`, entry_id: this._entryId, target: this._page.id, note_id: ds.notedel });
+        this._page.notes = r.notes; this._renderNotes();
+      } catch (e) { this._toast(e.message); }
+      return;
+    }
     if (ds.pen) { this._pen.color = ds.pen; this._fm.setPenColor(ds.pen); this._renderBanner(); return; }
     if (ds.scolor) { this._readForm(); this._draft.color = ds.scolor; this._renderSide(); return; }
     if (ds.offarea) { this._off.area = ds.offarea; this._offAreaOutline(); if (ds.offarea === "all") this._fm.map.fitBounds(this._off.src.bounds, { padding: [30, 30] }); this._renderSide(); return; }
@@ -888,12 +1073,12 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.ctl) {
       const p = this._point(this._sel); const key = `${p.id}:${ds.ctl}`;
-      if (this._confirm !== key) { this._confirm = key; this._renderSide(); clearTimeout(this._ct); this._ct = setTimeout(() => { this._confirm = null; this._renderSide(); }, 4000); return; }
+      if (this._confirm !== key) { this._confirm = key; this._rerender(); clearTimeout(this._ct); this._ct = setTimeout(() => { this._confirm = null; this._rerender(); }, 4000); return; }
       this._confirm = null;
       const e = p.entities.control; const dom = e.split(".")[0]; const on = ds.ctl === "on";
       const [svcDom, svc] = dom === "cover" ? ["cover", on ? "open_cover" : "close_cover"] : dom === "valve" ? ["valve", on ? "open_valve" : "close_valve"] : ["homeassistant", on ? "turn_on" : "turn_off"];
       try { await this._hass.callService(svcDom, svc, { entity_id: e }); this._toast(`${p.name}: ${on ? "on" : "off"} sent`); } catch (err) { this._toast(err.message); }
-      this._renderSide();
+      this._rerender();
       return;
     }
     switch (ds.act) {
@@ -924,6 +1109,14 @@ class HamletFarmPanel extends HTMLElement {
         this._renderBanner(); break;
       }
       case "pendone": this._stopPen(); this._renderBanner(); break;
+      case "pageback": this._closePage(); break;
+      case "noteadd": this._noteAdd(); break;
+      case "notephotox": if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url); this._notePhoto = null; this.$("npv").innerHTML = ""; break;
+      case "editshape": {
+        const id = this._page.id; this._closePage();
+        this._edit = true; this.$("editbtn").setAttribute("aria-pressed", "true"); this._renderBanner(); this._shapeClick(id);
+        break;
+      }
       case "offsave": this._offSave(); break;
       case "offstop": this._off?.ctrl?.abort(); break;
       case "offcancel": this._offClose(); break;
@@ -938,9 +1131,9 @@ class HamletFarmPanel extends HTMLElement {
         this.$("editbtn").setAttribute("aria-pressed", String(this._edit));
         this._fm.update(this._mapSnap()); this._renderBanner(); this._renderSide(); break;
       case "close": this._sel = null; this._fm.setSelected(null); this._renderSide(); break;
-      case "editpoint": this._edit = true; this.$("editbtn").setAttribute("aria-pressed", "true"); this._renderBanner(); this._openEditor(this._sel); break;
+      case "editpoint": { const id = this._page?.id || this._sel; if (this._page) this._closePage(); this._edit = true; this.$("editbtn").setAttribute("aria-pressed", "true"); this._renderBanner(); this._openEditor(id); break; }
       case "openpump": {
-        const p = this._point(this._sel);
+        const p = this._point(this._page?.id || this._sel);
         try { localStorage.setItem("hamlet_pump_entry", p.pump_entry); } catch (e) { /* ignore */ }
         history.pushState(null, "", "/hamlet-pump"); window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
         break;

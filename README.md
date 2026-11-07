@@ -59,6 +59,16 @@ Everything is optional – map what the point has.
 
 **Colours:** green = running · blue = on / open · amber = Eskom power on · grey = off · orange = attention (low level, gate open) · red = fault / no power · dashed grey = offline (no signal – often the Shelly lost power or Wi-Fi).
 
+## Point page and site log
+
+Tap a pump, pivot, Eskom point – or a line, drawing or piece of land – to open its own page:
+
+- **Now:** live status, On / Off (or Auto / Run / On / Off for a linked Hamlet Pump) and the readings. A linked Hamlet Pump shows its full pump card too.
+- **About:** the notes from setup, the linked entities (tap one for Home Assistant's history graph) and GPS. **Directions** opens Google Maps navigation.
+- **Site log:** anyone logged in can add a note – what was found, what was done, parts used – with a photo from the phone camera. Notes show who wrote them and when; the writer or an admin can delete one. Photos are shrunk on the phone before uploading and kept in `/config/hamlet_farm/` (in backups). Points with notes show a 📝 count in the list.
+
+**Map** goes back to the map at that point.
+
 ## Measure and draw
 
 - **Measure** (ruler button on the map, for everyone): tap the map – or a point to snap to it – to measure a pipe or cable run; every corner shows the distance so far. **Area** closes the shape and shows hectares. Admins can **Save as line** to keep it as a pipe, power line or land.
