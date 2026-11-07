@@ -24,7 +24,9 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "building": ("Building", "mdi:home-outline"),
     "other": ("Other", "mdi:map-marker"),
 }
-SHAPE_KINDS = {"pipe": "Water pipe", "power": "Power line", "fence": "Fence", "road": "Road", "field": "Land / camp"}
+SHAPE_KINDS = {"pipe": "Water pipe", "power": "Power line", "fence": "Fence", "road": "Road", "field": "Land / camp",
+               "sketch": "Drawing"}
+SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000")
 
 # entity roles a point can have
 ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle"]
@@ -131,7 +133,12 @@ def clean_shape(raw: dict) -> dict:
     pid = _txt(raw.get("id"), 16)
     if not re.match(r"^[A-Za-z0-9_-]+$", pid):
         pid = new_id()
-    return {"id": pid, "kind": kind, "name": _txt(raw.get("name"), 60) or SHAPE_KINDS[kind], "coords": coords[:500]}
+    shape = {"id": pid, "kind": kind, "name": _txt(raw.get("name"), 60) or SHAPE_KINDS[kind],
+             "coords": coords[:2000 if kind == "sketch" else 500]}
+    if kind == "sketch":
+        color = str(raw.get("color") or "").lower()
+        shape["color"] = color if color in SKETCH_COLORS else SKETCH_COLORS[0]
+    return shape
 
 
 def clean_view(raw: Any) -> dict | None:

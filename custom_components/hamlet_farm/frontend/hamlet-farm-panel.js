@@ -1,5 +1,5 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
-import { TYPES, ROLES, SHAPES, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue } from "./hamlet-farm-map.js";
+import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
@@ -67,6 +67,10 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .mseg button[aria-pressed="true"] { background: rgba(255,255,255,.22); }
 .mbtn { background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); backdrop-filter: blur(4px); }
 .mbtn ha-icon, .mseg ha-icon { --mdc-icon-size: 18px; }
+.mbtn[aria-pressed="true"] { background: #ffeb3b; color: #000; }
+.banner .big { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pen { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); cursor: pointer; padding: 0; }
+.pen[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.6); transform: scale(1.1); }
 .search { display: flex; flex: 1; max-width: 360px; background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); overflow: hidden; }
 .search input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: #fff; background: transparent; border: 0; padding: 7px 10px; outline: none; }
 .search input::placeholder { color: rgba(255,255,255,.65); }
@@ -221,6 +225,7 @@ class HamletFarmPanel extends HTMLElement {
               <button class="mbtn" data-act="fit" title="Show the whole farm"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button>
               <button class="mbtn" data-act="labels" title="Names on / off"><ha-icon icon="mdi:label-outline"></ha-icon></button>
               <button class="mbtn" data-act="locate" title="My location"><ha-icon icon="mdi:crosshairs-gps"></ha-icon></button>
+              <button class="mbtn" data-act="measure" id="measurebtn" title="Measure distance / area" aria-pressed="false"><ha-icon icon="mdi:ruler"></ha-icon></button>
             </div>
             <div class="ovl bl" id="banner"></div>
             <div class="toast" id="toast" hidden></div>
@@ -329,7 +334,22 @@ class HamletFarmPanel extends HTMLElement {
   /* ------------------------------------------------------------ banner (edit mode) */
   _renderBanner() {
     let html = "";
-    if (this._draw) {
+    if (this._measure) {
+      const m = this._measure; const c = m.coords;
+      const len = lineLength(m.closed && c.length > 2 ? [...c, c[0]] : c);
+      html = `<div class="banner"><ha-icon icon="mdi:ruler"></ha-icon>
+        ${c.length < 2 ? `<span>Tap the map (or a point) to measure</span>` : `<span class="big">${m.closed && c.length > 2 ? `${fmtArea(areaM2(c))} · ${fmtDist(len)} round` : fmtDist(len)}</span>`}
+        <button class="btn" data-act="mundo" ${c.length ? "" : "disabled"}>Undo</button>
+        <button class="btn" data-act="mclose" ${c.length > 2 ? "" : "disabled"} aria-pressed="${m.closed}">${m.closed ? "Line" : "Area"}</button>
+        <button class="btn" data-act="mclear" ${c.length ? "" : "disabled"}>Clear</button>
+        ${this._isAdmin && c.length > 1 ? `<button class="btn" data-act="msave">Save as line</button>` : ""}
+        <button class="btn primary" data-act="measure">Done</button></div>`;
+    } else if (this._pen) {
+      html = `<div class="banner"><ha-icon icon="mdi:draw"></ha-icon><span>Drag on the map to draw</span>
+        ${SKETCH_COLORS.map((c) => `<button class="pen" data-pen="${c}" style="background:${c}" aria-pressed="${this._pen.color === c}" aria-label="Colour ${c}"></button>`).join("")}
+        <button class="btn" data-act="penundo" ${this._pen.strokes.length ? "" : "disabled"}>Undo</button>
+        <button class="btn primary" data-act="pendone">Done</button></div>`;
+    } else if (this._draw) {
       const d = SHAPES[this._draw.kind];
       const n = this._draw.coords.length; const need = this._draw.kind === "field" ? 3 : 2;
       html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing <b>${esc(d.label.toLowerCase())}</b> – tap the map to add points (${n})</span>
@@ -342,6 +362,7 @@ class HamletFarmPanel extends HTMLElement {
       html = `<div class="banner"><ha-icon icon="mdi:pencil"></ha-icon><span><b>Editing</b> – drag to move, tap to change</span>
         <button class="btn primary" data-act="addpoint"><ha-icon icon="mdi:map-marker-plus"></ha-icon>Point</button>
         <button class="btn" data-act="addline"><ha-icon icon="mdi:vector-polyline"></ha-icon>Line / land</button>
+        <button class="btn" data-act="pen"><ha-icon icon="mdi:draw"></ha-icon>Draw</button>
         <button class="btn" data-act="saveview" title="Open the map here next time"><ha-icon icon="mdi:crop-free"></ha-icon>Start view</button>
         <button class="btn" data-act="edit">Done</button></div>`;
     }
@@ -692,6 +713,7 @@ class HamletFarmPanel extends HTMLElement {
       <section class="card" id="editor">
         <h2>${isNew ? "New line" : "Edit line"}<span class="sub"><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
         <div class="chips">${Object.entries(SHAPES).map(([k, s]) => `<button class="chip" data-skind="${k}" aria-pressed="${d.shape_kind === k}"><i style="width:14px;height:4px;border-radius:2px;background:${s.color};display:inline-block;outline:1px solid rgba(0,0,0,.3)"></i>${s.label}</button>`).join("")}</div>
+        ${d.shape_kind === "sketch" ? `<div class="chips" style="margin-top:8px">${SKETCH_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || SKETCH_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>` : ""}
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
           <div class="field inline"><span class="small muted">${d.coords.length} points${d.shape_kind === "field" ? ` · ≈ ${fmtN(this._area(d.coords) / 10000, 1)} ha` : ` · ≈ ${fmtN(this._length(d.coords), 0)} m`}</span></div>
@@ -728,7 +750,8 @@ class HamletFarmPanel extends HTMLElement {
 
   /* ------------------------------------------------------------ events */
   _select(id) {
-    if (this._draw || this._placing) return;
+    if (this._measure) { const p = this._point(id); if (p) this._mapClick({ lat: p.lat, lng: p.lng }); return; }
+    if (this._draw || this._placing || this._pen) return;
     if (this._edit && this._isAdmin) { this._openEditor(id); return; }
     this._sel = id; this._confirm = null; this._draft = null;
     this._fm.setSelected(id);
@@ -759,6 +782,8 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   _mapClick(ll) {
+    if (this._measure) { this._measure.coords.push([ll.lat, ll.lng]); this._fm.measure(this._measure.coords, this._measure.closed); this._renderBanner(); return; }
+    if (this._pen) return;
     if (this._draw) { this._draw.coords.push([ll.lat, ll.lng]); this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (this._placing) { this._newPoint(ll.lat, ll.lng); return; }
     if (this._draft || !this._sel) return;
@@ -766,10 +791,10 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   _shapeClick(id) {
-    if (!this._edit || this._draw || this._placing) return;
+    if (!this._edit || this._draw || this._placing || this._measure || this._pen) return;
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
-    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords };
+    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color };
     this._renderSide();
   }
 
@@ -830,7 +855,7 @@ class HamletFarmPanel extends HTMLElement {
     const path = ev.composedPath();
     const t = path.find((e) => e instanceof HTMLElement && (e.dataset?.act || e.dataset?.tab || e.dataset?.pt || e.dataset?.filter || e.dataset?.base
       || e.dataset?.ctl || e.dataset?.pmode || e.dataset?.type || e.dataset?.skind || e.dataset?.toggle
-      || e.dataset?.offarea || e.dataset?.offshow || e.dataset?.offvis || e.dataset?.offdel));
+      || e.dataset?.offarea || e.dataset?.offshow || e.dataset?.offvis || e.dataset?.offdel || e.dataset?.pen || e.dataset?.scolor));
     if (!t) return;
     const ds = t.dataset;
     if (ds.tab) { if (ds.tab !== this._entryId) this._selectFarm(ds.tab); return; }
@@ -842,6 +867,8 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.pen) { this._pen.color = ds.pen; this._fm.setPenColor(ds.pen); this._renderBanner(); return; }
+    if (ds.scolor) { this._readForm(); this._draft.color = ds.scolor; this._renderSide(); return; }
     if (ds.offarea) { this._off.area = ds.offarea; this._offAreaOutline(); if (ds.offarea === "all") this._fm.map.fitBounds(this._off.src.bounds, { padding: [30, 30] }); this._renderSide(); return; }
     if (ds.offshow) { const l = this._snap.offline.find((x) => x.id === ds.offshow); if (l) this._fm.map.fitBounds(l.bounds, { padding: [20, 20] }); return; }
     if (ds.offvis) { const l = this._snap.offline.find((x) => x.id === ds.offvis); try { await this._ws("offline_visible", { layer: { id: l.id, visible: l.visible === false } }); } catch (e) { this._toast(e.message); } return; }
@@ -870,6 +897,33 @@ class HamletFarmPanel extends HTMLElement {
       return;
     }
     switch (ds.act) {
+      case "measure":
+        if (this._measure) { this._measure = null; this._fm.measure(null); }
+        else { this._stopPen(); this._measure = { coords: [], closed: false }; }
+        this.$("measurebtn").setAttribute("aria-pressed", String(!!this._measure));
+        this._renderBanner(); break;
+      case "mundo": this._measure.coords.pop(); if (this._measure.coords.length < 3) this._measure.closed = false; this._fm.measure(this._measure.coords, this._measure.closed); this._renderBanner(); break;
+      case "mclose": this._measure.closed = !this._measure.closed; this._fm.measure(this._measure.coords, this._measure.closed); this._renderBanner(); break;
+      case "mclear": this._measure.coords = []; this._measure.closed = false; this._fm.measure(null); this._renderBanner(); break;
+      case "msave": {
+        const m = this._measure;
+        this._draft = { kind: "shape", id: Math.random().toString(16).slice(2, 10), shape_kind: m.closed && m.coords.length > 2 ? "field" : "pipe", name: "", coords: m.coords.slice() };
+        this._measure = null; this._fm.measure(null); this.$("measurebtn").setAttribute("aria-pressed", "false");
+        this._edit = true; this.$("editbtn").setAttribute("aria-pressed", "true");
+        this._fm.drawPreview(this._draft.shape_kind, this._draft.coords);
+        this._renderBanner(); this._renderSide(); break;
+      }
+      case "pen":
+        this._draft = null; this._sel = null; this._fm.setSelected(null);
+        this._pen = { color: this._pen?.color || SKETCH_COLORS[0], strokes: [] };
+        this._fm.freehand(true, this._pen.color, (coords) => this._saveStroke(coords));
+        this._renderBanner(); this._renderSide(); break;
+      case "penundo": {
+        const id = this._pen.strokes.pop();
+        if (id) { try { await this._ws("delete_shape", { shape_id: id }); } catch (e) { this._toast(e.message); } }
+        this._renderBanner(); break;
+      }
+      case "pendone": this._stopPen(); this._renderBanner(); break;
       case "offsave": this._offSave(); break;
       case "offstop": this._off?.ctrl?.abort(); break;
       case "offcancel": this._offClose(); break;
@@ -879,6 +933,7 @@ class HamletFarmPanel extends HTMLElement {
         try { const c = await this._gps(); this._fm.map.flyTo([c.latitude, c.longitude], 18); this._showMe(c); } catch (e) { this._toast(e.message); }
         break;
       case "edit":
+        this._stopPen();
         this._edit = !this._edit; this._draft = null; this._draw = null; this._placing = false; this._fm.drawPreview(null, []);
         this.$("editbtn").setAttribute("aria-pressed", String(this._edit));
         this._fm.update(this._mapSnap()); this._renderBanner(); this._renderSide(); break;
@@ -921,7 +976,7 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "saveshape": {
         this._readForm(); const d = this._draft;
-        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
         catch (e) { this.$("ferr").textContent = e.message; }
         break;
       }
@@ -939,6 +994,16 @@ class HamletFarmPanel extends HTMLElement {
       default: break;
     }
   }
+
+  async _saveStroke(coords) {
+    if (!this._pen) return;
+    try {
+      const saved = await this._ws("save_shape", { shape: { kind: "sketch", name: "Drawing", color: this._pen.color, coords } });
+      this._pen?.strokes.push(saved.id);
+    } catch (e) { this._toast(e.message); }
+    this._renderBanner();
+  }
+  _stopPen() { if (this._pen) { this._pen = null; this._fm.freehand(false); } }
 
   _showMe(c) {
     const L = this._fm.L;

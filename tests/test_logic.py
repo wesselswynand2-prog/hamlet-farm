@@ -29,6 +29,13 @@ def test_clean_point_validates():
     assert logic.clean_point({"lat": 1, "lng": 2, "type": "weird"})["type"] == "other"
 
 
+def test_sketch_shape():
+    s = logic.clean_shape({"kind": "sketch", "color": "#FFCC00", "coords": [[1, 2], [1.0001, 2.0001]]})
+    assert s["color"] == "#ffcc00" and s["name"] == "Drawing"
+    assert logic.clean_shape({"kind": "sketch", "color": "javascript:x", "coords": [[1, 2], [3, 4]]})["color"] == "#ff3b30"
+    assert "color" not in logic.clean_shape({"kind": "pipe", "color": "#ffcc00", "coords": [[1, 2], [3, 4]]})
+
+
 def test_clean_shape():
     s = logic.clean_shape({"kind": "pipe", "coords": [[1, 2], [3, 4]]})
     assert s["name"] == "Water pipe"

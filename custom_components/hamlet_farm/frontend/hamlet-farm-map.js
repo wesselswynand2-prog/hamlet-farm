@@ -35,7 +35,30 @@ export const SHAPES = {
   fence: { label: "Fence", color: "#f2f2f2", weight: 1.5, dash: "2 5" },
   road: { label: "Road", color: "#e0cfa6", weight: 4, dash: null },
   field: { label: "Land / camp", color: "#8fd16a", weight: 2, dash: null },
+  sketch: { label: "Drawing", color: "#ff3b30", weight: 4, dash: null },
 };
+export const SKETCH_COLORS = ["#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000"];
+
+/** Length of a line in metres and area of a closed shape in m² (good enough over a farm). */
+export function lineLength(coords) {
+  let m = 0;
+  for (let i = 1; i < coords.length; i++) m += distM(coords[i - 1], coords[i]);
+  return m;
+}
+export function distM(a, b) {
+  const R = 6371008.8, r = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * r, dLng = (b[1] - a[1]) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+export function areaM2(c) {
+  const R = 6378137, r = Math.PI / 180; let a = 0;
+  for (let i = 0; i < c.length; i++) { const [la1, lo1] = c[i]; const [la2, lo2] = c[(i + 1) % c.length];
+    a += (lo2 - lo1) * r * (2 + Math.sin(la1 * r) + Math.sin(la2 * r)); }
+  return Math.abs((a * R * R) / 2);
+}
+export const fmtDist = (m) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 1 : 2)} km` : `${Math.round(m)} m`);
+export const fmtArea = (m2) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(m2 >= 1e6 ? 0 : 1)} ha` : `${Math.round(m2).toLocaleString()} m²`);
 export const CLS_COLOR = {
   run: "#1baf7a", on: "#2a78d6", off: "#5f6368", warn: "#e08a00", bad: "#db4437", offline: "#8a8f96", info: "#ffffff",
 };
@@ -94,6 +117,9 @@ export const MAP_CSS = `
 .hf-handle { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid #2a78d6; box-shadow: 0 1px 5px rgba(0,0,0,.6); cursor: grab; }
 .hf-handle.move { width: 26px; height: 26px; background: #2a78d6; border-color: #fff; }
 .leaflet-pane.leaflet-offline-pane img { image-rendering: auto; }
+.hf-measure-lbl { background: rgba(20,24,28,.85); color: #fff; border: 0; border-radius: 6px; padding: 2px 6px; font-size: 12px; font-weight: 500; box-shadow: none; }
+.hf-measure-lbl::before { display: none; }
+.hf-field-lbl small { font-weight: 400; }
 .hf-vertex { width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #2a78d6; }
 `;
 
@@ -250,26 +276,32 @@ export class FarmMap {
     const seen = new Set();
     for (const s of shapes) {
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords]);
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color]);
       const old = this.shapes.get(s.id);
-      if (old && old._key === key) continue;
+      if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
       const d = SHAPES[s.kind] || SHAPES.pipe;
-      const opts = { color: d.color, weight: d.weight, dashArray: d.dash, opacity: 0.95 };
+      const color = s.kind === "sketch" && s.color ? s.color : d.color;
+      const opts = { color, weight: d.weight, dashArray: d.dash, opacity: 0.95, lineCap: "round", lineJoin: "round" };
       let layer;
       if (s.kind === "field") {
         layer = L.polygon(s.coords, { ...opts, fillColor: d.color, fillOpacity: 0.12 });
-        layer.bindTooltip(esc(s.name), { permanent: true, direction: "center", className: "hf-field-lbl" });
+        layer.bindTooltip(`${esc(s.name)}<br><small>${fmtArea(areaM2(s.coords))}</small>`, { permanent: true, direction: "center", className: "hf-field-lbl" });
+      } else if (s.kind === "sketch") {
+        const casing = L.polyline(s.coords, { color: color === "#000000" ? "#fff" : "#000", weight: d.weight + 2, opacity: 0.3, interactive: false, lineCap: "round", lineJoin: "round" });
+        const line = L.polyline(s.coords, opts);
+        layer = L.layerGroup([casing, line]);
+        line.on("click", (e) => { if (this.editing) { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); } });
       } else {
         // dark casing underneath so lines read on satellite imagery
         const casing = L.polyline(s.coords, { color: "#000", weight: d.weight + 2.5, opacity: 0.35, interactive: false });
         const line = L.polyline(s.coords, opts);
-        line.bindTooltip(esc(s.name), { sticky: true });
+        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
         layer = L.layerGroup([casing, line]);
         line.on("click", (e) => { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); });
       }
       if (s.kind === "field") layer.on("click", (e) => { if (this.editing) { L.DomEvent.stopPropagation(e); this.cb.onShapeClick && this.cb.onShapeClick(s.id); } });
-      layer._key = key;
+      layer._key = key + (s.color || "");
       layer.addTo(this.shapeLayer);
       this.shapes.set(s.id, layer);
     }
@@ -327,6 +359,64 @@ export class FarmMap {
   setAlignOpacity(v) { this._align?.ov.setOpacity(v); }
   clearAlign() { this.previewLayer.clearLayers(); this._outlines = {}; this._align = null; }
   bounds() { const b = this.map.getBounds(); return [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]]; }
+
+  /** Measuring: draws the line / shape with a distance at every corner. */
+  measure(coords, closed) {
+    const L = this.L;
+    if (!this.measureLayer) this.measureLayer = L.layerGroup().addTo(this.map);
+    this.measureLayer.clearLayers();
+    if (!coords || !coords.length) return;
+    const opts = { color: "#ffeb3b", weight: 3, dashArray: "8 6", interactive: false };
+    if (closed && coords.length > 2) L.polygon(coords, { ...opts, fillColor: "#ffeb3b", fillOpacity: 0.15 }).addTo(this.measureLayer);
+    else if (coords.length > 1) L.polyline(coords, opts).addTo(this.measureLayer);
+    let total = 0;
+    coords.forEach((c, i) => {
+      if (i) total += distM(coords[i - 1], c);
+      const m = L.circleMarker(c, { radius: 5, color: "#000", weight: 1.5, fillColor: "#ffeb3b", fillOpacity: 1, interactive: false }).addTo(this.measureLayer);
+      if (i) m.bindTooltip(fmtDist(total), { permanent: true, direction: "right", offset: [8, 0], className: "hf-measure-lbl" });
+    });
+    if (closed && coords.length > 2) {
+      const back = distM(coords[coords.length - 1], coords[0]);
+      const mid = [(coords[coords.length - 1][0] + coords[0][0]) / 2, (coords[coords.length - 1][1] + coords[0][1]) / 2];
+      L.tooltip({ permanent: true, direction: "center", className: "hf-measure-lbl" }).setLatLng(mid).setContent(fmtDist(back)).addTo(this.measureLayer);
+    }
+  }
+
+  /** Freehand pen: drag on the map to draw. onStroke(coords) gets each finished stroke. */
+  freehand(on, color, onStroke) {
+    const L = this.L; const el = this.container; const map = this.map;
+    if (this._fh) { el.removeEventListener("pointerdown", this._fh.down, true); window.removeEventListener("pointermove", this._fh.move, true); window.removeEventListener("pointerup", this._fh.up, true); this._fh = null; }
+    this._penColor = color;
+    if (!on) { map.dragging.enable(); el.style.cursor = this.editing ? "crosshair" : ""; return; }
+    map.dragging.disable(); el.style.cursor = "crosshair";
+    let pts = null; let live = null;
+    const ll = (e) => { const r = el.getBoundingClientRect(); const p = map.containerPointToLatLng(L.point(e.clientX - r.left, e.clientY - r.top)); return [p.lat, p.lng]; };
+    const down = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      if (e.target.closest && e.target.closest(".leaflet-control")) return;
+      e.preventDefault(); e.stopPropagation();
+      pts = [ll(e)];
+      live = L.polyline(pts, { color: this._penColor, weight: 4, opacity: 0.95, lineCap: "round", lineJoin: "round", interactive: false }).addTo(this.drawLayer);
+    };
+    const move = (e) => {
+      if (!pts) return;
+      e.preventDefault();
+      const p = ll(e); const last = pts[pts.length - 1];
+      // skip points closer than ~3 screen pixels, so a stroke stays small
+      const a = map.latLngToContainerPoint(last), b = map.latLngToContainerPoint(p);
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 3) return;
+      pts.push(p); live.setLatLngs(pts);
+    };
+    const up = () => {
+      if (!pts) return;
+      const done = pts; pts = null;
+      this.drawLayer.removeLayer(live); live = null;
+      if (done.length > 1) onStroke(done.slice(0, 2000));
+    };
+    el.addEventListener("pointerdown", down, true); window.addEventListener("pointermove", move, true); window.addEventListener("pointerup", up, true);
+    this._fh = { down, move, up };
+  }
+  setPenColor(c) { this._penColor = c; }
 
   /** Line being drawn in edit mode. */
   drawPreview(kind, coords) {

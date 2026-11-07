@@ -59,6 +59,12 @@ Everything is optional – map what the point has.
 
 **Colours:** green = running · blue = on / open · amber = Eskom power on · grey = off · orange = attention (low level, gate open) · red = fault / no power · dashed grey = offline (no signal – often the Shelly lost power or Wi-Fi).
 
+## Measure and draw
+
+- **Measure** (ruler button on the map, for everyone): tap the map – or a point to snap to it – to measure a pipe or cable run; every corner shows the distance so far. **Area** closes the shape and shows hectares. Admins can **Save as line** to keep it as a pipe, power line or land.
+- **Draw** (admin, Edit → **Draw**): drag a finger or the mouse to draw on the map in red, yellow, white, green, blue, orange or black – mark a leak, a new trench or where to dig. **Undo** takes back the last stroke; tap a drawing in edit mode to rename, recolour or delete it.
+- Saved lines show their length when you hover or tap them, and land shows its hectares.
+
 ## Alerts
 
 A point with *Alert when this point has a problem* on (default) alerts when it is **faulted, has no power, is offline or low** for longer than *Alert after* (default 2 min, so a blip doesn't alert), and again when it's back to normal. Alerts show on the map page, as Home Assistant notifications and, if set, on a phone via *Send alerts to* (e.g. `notify.mobile_app_wynand`).
