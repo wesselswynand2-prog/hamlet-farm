@@ -242,6 +242,12 @@ async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client
     resp = await anon.get(f"/api/hamlet_farm/photos/wrong/{photo}")
     assert resp.status == 404
 
+    await ws.send_json({"id": 30, "type": f"{DOMAIN}/search", "entry_id": entry.entry_id, "q": "pressure SWITCH"})
+    hits = (await _reply(ws, 30))["result"]["notes"]
+    assert len(hits) == 1 and hits[0]["target"] == pid and hits[0]["name"] == "Borehole 1" and hits[0]["photo"]
+    await ws.send_json({"id": 31, "type": f"{DOMAIN}/search", "entry_id": entry.entry_id, "q": "nothing like this"})
+    assert (await _reply(ws, 31))["result"]["notes"] == []
+
     # a read-only (non-admin) user can add notes but not delete someone else's
     ro = await hass_ws_client(hass, hass_read_only_access_token)
     await ro.send_json({"id": 1, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": pid, "text": "Checked, all OK"})
@@ -257,8 +263,8 @@ async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client
     # deleting the point removes its notes and photos
     path = hass.config.path("hamlet_farm", entry.entry_id, "photos", f"{photo}.jpg")
     assert os.path.exists(path)
-    await ws.send_json({"id": 5, "type": f"{DOMAIN}/delete_point", "entry_id": entry.entry_id, "point_id": pid})
-    assert (await _reply(ws, 5))["success"]
+    await ws.send_json({"id": 40, "type": f"{DOMAIN}/delete_point", "entry_id": entry.entry_id, "point_id": pid})
+    assert (await _reply(ws, 40))["success"]
     await hass.async_block_till_done()
     assert not os.path.exists(path)
     assert hass.data[DOMAIN][entry.entry_id].notes == {}

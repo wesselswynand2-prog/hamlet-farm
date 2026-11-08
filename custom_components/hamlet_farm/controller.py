@@ -464,6 +464,26 @@ class FarmController:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("%s: notify %s failed: %s", self.name, svc, err)
 
+    def search_notes(self, q: str, user, limit: int = 20) -> list[dict]:
+        """Site-log notes containing every word of q (newest first)."""
+        words = [w for w in str(q or "").lower().split() if w][:6]
+        if not words:
+            return []
+        hidden = set() if (user and user.is_admin) else {s["id"] for s in self.shapes if s.get("hidden")}
+        kinds = {p["id"]: ("point", p["name"]) for p in self.points}
+        kinds.update({s["id"]: ("shape", s["name"]) for s in self.shapes})
+        hits = []
+        for target, lst in self.notes.items():
+            if target in hidden or target not in kinds:
+                continue
+            for n in lst:
+                hay = f"{n.get('text', '')} {n.get('user', '')}".lower()
+                if all(w in hay for w in words):
+                    hits.append({"target": target, "kind": kinds[target][0], "name": kinds[target][1], "id": n["id"],
+                                 "text": (n.get("text") or "")[:300], "user": n.get("user"), "t": n.get("t"), "photo": bool(n.get("photo"))})
+        hits.sort(key=lambda h: h.get("t") or "", reverse=True)
+        return hits[:limit]
+
     def _drop_notes(self, target: str) -> None:
         for d in self.docs:
             if d.get("point") == target:

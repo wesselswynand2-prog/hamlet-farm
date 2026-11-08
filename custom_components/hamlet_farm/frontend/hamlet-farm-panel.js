@@ -47,7 +47,7 @@ const STYLE = `
 .tbtn ha-icon { --mdc-icon-size: 18px; }
 .tbtn[aria-pressed="true"] { background: var(--app-header-text-color, #fff); color: var(--app-header-background-color, var(--primary-color)); }
 .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
-@media (max-width: 899px) { .wrap { height: auto; min-height: 100vh; } .body { grid-template-columns: 1fr; grid-template-rows: 58vh auto; } }
+@media (max-width: 899px) { .wrap { height: auto; min-height: 100vh; } .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 58vh auto; } }
 .mapbox { position: relative; min-height: 300px; }
 .side { overflow-y: auto; padding: var(--gap); display: flex; flex-direction: column; gap: var(--gap); border-left: 1px solid var(--line); }
 @media (max-width: 899px) { .side { border-left: 0; overflow: visible; } }
@@ -62,8 +62,8 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 /* map overlay controls */
 .ovl { position: absolute; z-index: 500; display: flex; gap: 6px; }
 .ovl.tr { top: 10px; right: 10px; flex-direction: column; align-items: flex-end; }
-.ovl.tl { top: 10px; left: 56px; right: 64px; }
-@media (max-width: 599px) { .ovl.tl { right: 10px; } .ovl.tr { top: 52px; } }
+.ovl.tl { top: 10px; left: 56px; right: 64px; z-index: 1001; }
+@media (max-width: 599px) { .ovl.tl { right: 10px; } .ovl.tr { top: 52px; } .sbox { max-width: none; } }
 .ovl.bl { bottom: 22px; left: 10px; right: 10px; justify-content: center; pointer-events: none; }
 .ovl.bl > * { pointer-events: auto; }
 .mseg { display: inline-flex; background: rgba(20,24,28,.82); border-radius: 10px; overflow: hidden; backdrop-filter: blur(4px); box-shadow: 0 1px 6px rgba(0,0,0,.4); }
@@ -82,7 +82,19 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .banner .big { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .pen { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); cursor: pointer; padding: 0; }
 .pen[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.6); transform: scale(1.1); }
-.search { display: flex; flex: 1; max-width: 360px; background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); overflow: hidden; }
+.sbox { position: relative; flex: 1; max-width: 420px; display: flex; flex-direction: column; }
+.sres { margin-top: 6px; background: var(--card); color: var(--primary-text-color); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45); max-height: min(62vh, 520px); overflow-y: auto; padding: 4px 0; }
+.sres .sg { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 12px 2px; }
+.sres button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; font: inherit; background: none; border: 0; color: inherit; padding: 7px 12px; cursor: pointer; }
+.sres button[aria-selected="true"], .sres button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sres .si { width: 28px; height: 28px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; background: var(--mc, var(--secondary-background-color)); color: #fff; }
+.sres .si.plain { background: none; color: var(--muted); }
+.sres .si ha-icon { --mdc-icon-size: 17px; }
+.sres .st { flex: 1; min-width: 0; } .sres .st div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.sres .st .ss { font-size: 12px; color: var(--muted); }
+.sres mark { background: color-mix(in srgb, #ffeb3b 55%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+.sres .snone { padding: 10px 12px; font-size: 13px; color: var(--muted); }
+.search { display: flex; flex: 1; background: rgba(20,24,28,.82); border-radius: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.4); overflow: hidden; }
 .search input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: #fff; background: transparent; border: 0; padding: 7px 10px; outline: none; }
 .search input::placeholder { color: rgba(255,255,255,.65); }
 .banner { background: rgba(20,24,28,.88); color: #fff; border-radius: 12px; padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
@@ -283,7 +295,8 @@ class HamletFarmPanel extends HTMLElement {
         <div class="body">
           <div class="mapbox">
             <div class="hf-map" id="map"></div>
-            <div class="ovl tl"><form class="search" id="search"><input id="q" type="text" placeholder="Go to place or GPS: -25.75, 28.19" aria-label="Search place or coordinates"><button class="mbtn" type="submit" aria-label="Search"><ha-icon icon="mdi:magnify"></ha-icon></button></form></div>
+            <div class="ovl tl"><div class="sbox"><form class="search" id="search"><input id="q" type="search" placeholder="Search pumps, Eskom, notes, sensors, places…  ( / )" aria-label="Search" autocomplete="off" role="combobox" aria-controls="sres" aria-expanded="false"><button class="mbtn" type="submit" aria-label="Search"><ha-icon icon="mdi:magnify"></ha-icon></button></form>
+              <div class="sres" id="sres" role="listbox" hidden></div></div></div>
             <div class="ovl tr">
               <div class="mseg" id="base"></div>
               <button class="mbtn" data-act="fit" title="Show the whole farm"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button>
@@ -312,7 +325,20 @@ class HamletFarmPanel extends HTMLElement {
     root.getElementById("docmodal").addEventListener("click", (ev) => { if (ev.target === ev.currentTarget) this._closeDoc(); });
     root.addEventListener("input", (ev) => this._input(ev));
     root.addEventListener("change", (ev) => this._input(ev));
-    root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._search(); });
+    root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._searchEnter(); });
+    const qi = root.getElementById("q");
+    qi.addEventListener("input", () => this._searchInput());
+    qi.addEventListener("focus", () => { if (qi.value.trim()) this._searchInput(); });
+    qi.addEventListener("keydown", (ev) => this._searchKey(ev));
+    qi.addEventListener("blur", () => setTimeout(() => { if (this.shadowRoot.activeElement !== qi) this._searchClose(); }, 200));
+    this._slash = (ev) => {
+      if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || !this.isConnected) return;
+      const a = this.shadowRoot.activeElement; const t = ev.composedPath()[0];
+      if ((a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName))) return;
+      if (this._page || !this.$("help").hidden) return;
+      ev.preventDefault(); qi.focus();
+    };
+    window.addEventListener("keydown", this._slash);
     try {
       this._entries = await this._hass.callWS({ type: `${DOMAIN}/list` });
     } catch (e) {
@@ -1319,17 +1345,156 @@ class HamletFarmPanel extends HTMLElement {
     });
   }
 
-  async _search() {
+  /* ------------------------------------------------------------ quick search */
+  _searchInput() {
+    clearTimeout(this._sT); clearTimeout(this._sNT);
+    const q = this.$("q").value.trim();
+    if (!q) { this._searchClose(); return; }
+    this._sT = setTimeout(() => {
+      this._sLocal = this._searchLocal(q); this._sNotes = this._sNotesQ === q ? this._sNotes : [];
+      this._sIdx = 0; this._renderSearch(q);
+    }, 80);
+    if (q.length >= 2) {
+      this._sNT = setTimeout(async () => {
+        try {
+          const r = await this._hass.callWS({ type: `${DOMAIN}/search`, entry_id: this._entryId, q });
+          if (this.$("q").value.trim() !== q) return;
+          this._sNotes = r.notes; this._sNotesQ = q; this._renderSearch(q);
+        } catch (e) { /* ignore */ }
+      }, 250);
+    }
+  }
+
+  _searchLocal(q) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const H = this._hass; const fn = (e) => H.states[e]?.attributes?.friendly_name || "";
+    const match = (fields) => {   // fields: [[label, value]] – every word must be somewhere; returns the best field to show
+      const hay = fields.map(([, v]) => String(v || "").toLowerCase()).join(" \u0001 ");
+      if (!words.every((w) => hay.includes(w))) return null;
+      const why = fields.slice(1).find(([, v]) => v && words.some((w) => String(v).toLowerCase().includes(w)));
+      const name = String(fields[0][1] || "").toLowerCase();
+      const score = name.startsWith(words[0]) ? 0 : words.every((w) => name.includes(w)) ? 1 : 2;
+      return { why, score };
+    };
+    const SPEC = { account: "Eskom account", meter: "Meter no.", pole: "Pole no.", kva: "kVA", nmd: "NMD kVA", supply: "Supply", tariff: "Tariff", primary: "Primary", secondary: "Secondary" };
+    const res = { points: [], shapes: [], docs: [], entities: [] };
+    const linked = new Set();
+    for (const p of this._snap.points) {
+      const st = this._st(p.id);
+      const ents = [...Object.values(p.entities || {}), ...(p.extra || [])];
+      ents.forEach((e) => linked.add(e));
+      const fields = [["", p.name], ["", TYPES[p.type]?.label], ["Status", st.status], ["Notes", p.notes],
+        ...Object.entries(p.specs || {}).map(([k, v]) => [SPEC[k] || k, v]),
+        ...ents.flatMap((e) => [["Sensor", e], ["Sensor", fn(e)]]),
+        ["Pump", this._pumps.find((x) => x.entry_id === p.pump_entry)?.name]];
+      const m = match(fields);
+      if (m) res.points.push({ p, st, ...m });
+    }
+    for (const sh of this._snap.shapes) {
+      if (!this._shapeVisible(sh) && !(this._isAdmin && sh.hidden)) continue;
+      const m = match([["", sh.name], ["", SHAPES[sh.kind]?.label], ["Details", sh.info]]);
+      if (m) res.shapes.push({ sh, ...m });
+    }
+    for (const d of this._docs || []) {
+      const m = match([["", d.title], ["", DOC_KINDS[d.kind]?.[0]], ["Amount", d.amount], ["Note", d.notes]]);
+      if (m) res.docs.push({ d, ...m });
+    }
+    if (q.length >= 2) {
+      for (const so of Object.values(H.states)) {
+        if (linked.has(so.entity_id)) continue;
+        const m = match([["", so.attributes.friendly_name || so.entity_id], ["", so.entity_id]]);
+        if (m) res.entities.push({ so, ...m });
+        if (res.entities.length > 40) break;
+      }
+    }
+    for (const k of Object.keys(res)) res[k].sort((a, b) => a.score - b.score);
+    res.entities = res.entities.slice(0, 6);
+    return res;
+  }
+
+  _renderSearch(q) {
+    const box = this.$("sres"); const r = this._sLocal || { points: [], shapes: [], docs: [], entities: [] };
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hl = (t) => { let h = esc(t || ""); for (const w of words) h = h.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "<mark>$1</mark>"); return h; };
+    const items = []; const groups = [];
+    const add = (group, html, action) => { if (groups[groups.length - 1] !== group) { groups.push(group); items.push({ group }); } items.push({ html, action }); };
+    const why = (m, fallback) => (m.why ? `${esc(m.why[0])}${m.why[0] ? ": " : ""}${hl(m.why[1])}` : esc(fallback || ""));
+    for (const m of r.points.slice(0, 8)) {
+      const cls = m.st.cls || "info";
+      add("Points", `<span class="si" style="--mc:${clsColor(cls, m.p.type)}${cls === "info" ? ";color:#333;border:1px solid var(--line)" : ""}"><ha-icon icon="${ICON(m.p.type)}"></ha-icon></span>
+        <span class="st"><div>${hl(m.p.name)}</div><div class="ss">${why(m, `${TYPES[m.p.type]?.label || ""}${m.st.status ? " · " + m.st.status : ""}`)}</div></span>`, { kind: "point", id: m.p.id });
+    }
+    for (const m of r.shapes.slice(0, 5)) {
+      const d = SHAPES[m.sh.kind] || SHAPES.pipe;
+      add("Lines & land", `<span class="si plain"><span class="hline" style="display:inline-block;width:20px;height:5px;border-radius:3px;background:${m.sh.kind === "sketch" && m.sh.color ? m.sh.color : d.color}"></span></span>
+        <span class="st"><div>${hl(m.sh.name)}${m.sh.hidden ? " (planning)" : ""}</div><div class="ss">${why(m, `${d.label} · ${m.sh.kind === "field" ? fmtArea(areaM2(m.sh.coords)) : fmtDist(lineLength(m.sh.coords))}`)}</div></span>`, { kind: "shape", id: m.sh.id });
+    }
+    for (const m of r.docs.slice(0, 5)) {
+      const [kl, icon] = DOC_KINDS[m.d.kind] || DOC_KINDS.other;
+      add("Quotes & documents", `<span class="si plain"><ha-icon icon="${icon}"></ha-icon></span><span class="st"><div>${hl(m.d.title)}</div><div class="ss">${why(m, `${kl}${m.d.amount ? " · " + m.d.amount : ""}`)}</div></span>`, { kind: "doc", id: m.d.id });
+    }
+    for (const n of (this._sNotes || []).slice(0, 8)) {
+      add("Site log notes", `<span class="si plain"><ha-icon icon="${n.photo ? "mdi:camera-outline" : "mdi:note-text-outline"}"></ha-icon></span>
+        <span class="st"><div>${hl(n.text || "(photo)")}</div><div class="ss">${esc(n.name)} · ${esc(n.user || "")} · ${dstr(n.t)}</div></span>`, { kind: n.kind === "point" ? "point" : "shape", id: n.target, log: true });
+    }
+    for (const m of r.entities) {
+      add("Other sensors & switches", `<span class="si plain"><ha-icon icon="mdi:tune-variant"></ha-icon></span>
+        <span class="st"><div>${hl(m.so.attributes.friendly_name || m.so.entity_id)}</div><div class="ss">${hl(m.so.entity_id)} · ${esc(this._hass.formatEntityState ? this._hass.formatEntityState(m.so) : m.so.state)}</div></span>`, { kind: "entity", id: m.so.entity_id });
+    }
+    const gps = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (gps) add("Go to", `<span class="si plain"><ha-icon icon="mdi:crosshairs-gps"></ha-icon></span><span class="st"><div>GPS ${esc(gps[1])}, ${esc(gps[2])}</div></span>`, { kind: "gps", lat: Number(gps[1]), lng: Number(gps[2]) });
+    else add("Go to", `<span class="si plain"><ha-icon icon="mdi:map-search-outline"></ha-icon></span><span class="st"><div>Find the place “${esc(q)}”</div><div class="ss">Town or farm name – needs internet</div></span>`, { kind: "place", q });
+    this._sItems = items.filter((x) => x.action);
+    if (this._sIdx >= this._sItems.length) this._sIdx = 0;
+    let n = -1;
+    box.innerHTML = items.map((x) => x.group ? `<div class="sg">${esc(x.group)}</div>` : `<button role="option" data-sidx="${++n}" aria-selected="${n === this._sIdx}">${x.html}</button>`).join("")
+      + (this._sItems.length === 1 ? `<div class="snone">Nothing on the farm matches “${esc(q)}”.</div>` : "");
+    box.hidden = false; this.$("q").setAttribute("aria-expanded", "true");
+    box.querySelectorAll("[data-sidx]").forEach((b) => b.addEventListener("mousedown", (ev) => { ev.preventDefault(); this._searchGo(this._sItems[Number(b.dataset.sidx)].action); }));
+  }
+
+  _searchKey(ev) {
+    const box = this.$("sres");
+    if (ev.key === "Escape") { this._searchClose(); this.$("q").blur(); return; }
+    if (box.hidden || !this._sItems?.length) return;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      this._sIdx = (this._sIdx + (ev.key === "ArrowDown" ? 1 : -1) + this._sItems.length) % this._sItems.length;
+      box.querySelectorAll("[data-sidx]").forEach((b) => b.setAttribute("aria-selected", String(Number(b.dataset.sidx) === this._sIdx)));
+      box.querySelector(`[data-sidx="${this._sIdx}"]`)?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  _searchEnter() {
     const q = this.$("q").value.trim(); if (!q) return;
-    const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
-    if (m) { this._fm.map.flyTo([Number(m[1]), Number(m[2])], 17); return; }
-    const hit = this._snap.points.find((p) => p.name.toLowerCase().includes(q.toLowerCase()));
-    if (hit) { this._fm.flyTo(hit); this._select(hit.id); return; }
-    try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
-      const j = await r.json();
-      if (j[0]) this._fm.map.flyTo([Number(j[0].lat), Number(j[0].lon)], 15); else this._toast("Not found");
-    } catch (e) { this._toast("Search needs internet"); }
+    if (!this._sItems?.length) { this._sLocal = this._searchLocal(q); this._sIdx = 0; this._renderSearch(q); }
+    const it = this._sItems[this._sIdx || 0];
+    if (it) this._searchGo(it.action);
+  }
+
+  _searchClose() { const b = this.$("sres"); if (b) { b.hidden = true; b.innerHTML = ""; } this._sItems = []; this.$("q")?.setAttribute("aria-expanded", "false"); }
+
+  async _searchGo(a) {
+    this._searchClose(); this.$("q").blur();
+    if (a.kind === "point") {
+      const p = this._point(a.id); if (!p) return;
+      this._fm.flyTo(p); this._openPage("point", p.id);
+      if (a.log) setTimeout(() => this.$("pg-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    } else if (a.kind === "shape") {
+      const sh = this._snap.shapes.find((x) => x.id === a.id); if (!sh) return;
+      this._fm.map.fitBounds(sh.coords, { padding: [40, 40], maxZoom: 18 });
+      this._openPage("shape", sh.id);
+      if (a.log) setTimeout(() => this.$("pg-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    } else if (a.kind === "doc") this._openDoc(a.id);
+    else if (a.kind === "entity") this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: a.id }, bubbles: true, composed: true }));
+    else if (a.kind === "gps") this._fm.map.flyTo([a.lat, a.lng], 17);
+    else if (a.kind === "place") {
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(a.q)}`);
+        const j = await r.json();
+        if (j[0]) this._fm.map.flyTo([Number(j[0].lat), Number(j[0].lon)], 15); else this._toast("Place not found");
+      } catch (e) { this._toast("Finding places needs internet"); }
+    }
   }
 
   _readForm() {

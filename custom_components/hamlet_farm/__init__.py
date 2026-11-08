@@ -113,7 +113,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_delete_shapes, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
-                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete,
+                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete, ws_search,
                     ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
 
@@ -299,3 +299,10 @@ def ws_doc_respond(hass, connection, msg):
             connection.send_error(msg["id"], "invalid", str(err))
             return
         connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/search", vol.Required("entry_id"): str, vol.Required("q"): str})
+@callback
+def ws_search(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        connection.send_result(msg["id"], {"notes": controller.search_notes(msg["q"], connection.user)})

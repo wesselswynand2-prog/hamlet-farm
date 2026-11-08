@@ -30,7 +30,7 @@ Nothing on the map can be changed by accident – On / Off buttons need **two ta
 
 - **Zoom:** pinch, the mouse wheel or **+ / −**. **Move:** drag.
 - **Satellite / Hybrid / Map** (top right) changes the background. Hybrid adds road and place names.
-- **Search** (top left): type a point's name, a place, or GPS like `-25.86, 28.10`.
+- **Search** (top left – or press **/** on a keyboard): results show while you type, grouped as points (by name, type, status, **Eskom account / meter / pole number**, kVA, tariff, or a **linked sensor**), lines & land (name, cable details), quotes & documents, **site log notes** (words in a note or who wrote it), other sensors & switches (opens their history), and **Find the place** / GPS like `-25.86, 28.10`. Use ↑ ↓ and Enter, or tap a result: points and lines open their page, notes open the page at the site log.
 - **Show the whole farm.**
 - **Layers:** choose what is shown – names, drawings, pipes, cables, overhead lines, fences, roads, land, the offline photo. Each phone / PC remembers its own choice.
 - **My location:** shows where you stand (needs Home Assistant over https, e.g. Nabu Casa, and location permission).
