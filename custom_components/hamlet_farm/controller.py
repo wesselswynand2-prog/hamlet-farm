@@ -39,6 +39,7 @@ class FarmController:
         self.energy_base: dict[str, Any] = {"date": None, "base": {}}
         self.notes: dict[str, list[dict]] = {}
         self.docs: list[dict] = []
+        self.services: list[dict] = []
         self.offline: list[dict] = []
         self.tile_token: str = ""
         self.statuses: dict[str, dict] = {}
@@ -68,6 +69,7 @@ class FarmController:
         self.tile_token = data.get("tile_token") or secrets.token_urlsafe(18)
         self.notes = {k: v for k, v in (data.get("notes") or {}).items() if isinstance(v, list)}
         self.docs = [d for d in (data.get("docs") or []) if d.get("size")]   # drop uploads that never got their file
+        self.services = list(data.get("services") or [])
         await self.hass.async_add_executor_job(notes_mod.clean_orphans, self.hass, self.entry.entry_id, self._photo_ids())
         self.offline = []
         for layer in data.get("offline") or []:
@@ -107,7 +109,7 @@ class FarmController:
         return {
             "points": self.points, "shapes": self.shapes, "view": self.view, "settings": self.settings,
             "events": self.events[-MAX_EVENTS:], "energy_base": self.energy_base, "alerted": sorted(self._alerted),
-            "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes, "docs": self.docs,
+            "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes, "docs": self.docs, "services": self.services,
         }
 
     def _save(self) -> None:
@@ -294,6 +296,7 @@ class FarmController:
 
     def delete_point(self, pid: str) -> None:
         self.points = [p for p in self.points if p["id"] != pid]
+        self.services = [r for r in self.services if r.get("point") != pid]
         self._drop_notes(pid)
         self._changed()
 
@@ -385,6 +388,75 @@ class FarmController:
             self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id, [note["photo"]])
         if note.get("file"):
             self._bg(notes_mod.delete_files, self.hass, self.entry.entry_id, [note["file"]])
+        self._save()
+        self._recompute()
+
+    # ------------------------------------------------------------ service reports
+    def services_for(self, user, point: str | None = None) -> list[dict]:
+        admin = bool(user and user.is_admin)
+        out = [r for r in self.services if (admin or (user and user.id in r.get("users", []))) and (point is None or r.get("point") == point)]
+        if not admin:
+            out = [{k: v for k, v in r.items() if k != "users"} for r in out]
+        return sorted(out, key=lambda r: (r.get("date") or "", r.get("created") or ""), reverse=True)
+
+    def service_summary(self) -> dict:
+        """Last service and next due per point, for everyone (no prices)."""
+        out: dict[str, dict] = {}
+        for r in sorted(self.services, key=lambda r: r.get("date") or ""):
+            out[r["point"]] = {"last": r.get("date"), "title": r.get("title"), "next": r.get("next_due") or out.get(r["point"], {}).get("next")}
+        return out
+
+    def service_save(self, raw: dict, user) -> dict:
+        import re as _re
+        if not isinstance(raw, dict):
+            raise ValueError("bad report")
+        point = str(raw.get("point") or "")
+        if not any(p["id"] == point for p in self.points):
+            raise ValueError("Point not found")
+        date_re = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        date = str(raw.get("date") or "")[:10]
+        if not date_re.match(date):
+            raise ValueError("Pick the service date")
+        nxt = str(raw.get("next_due") or "")[:10]
+        items = []
+        for it in (raw.get("items") or [])[:60]:
+            if not isinstance(it, dict):
+                continue
+            desc = str(it.get("desc") or "").strip()[:160]
+            try:
+                qty = float(it.get("qty") or 0)
+                price = float(it.get("price") or 0)
+            except (TypeError, ValueError) as err:
+                raise ValueError("Quantity and price must be numbers") from err
+            if desc or price:
+                items.append({"desc": desc, "qty": round(qty, 3), "price": round(price, 2)})
+        rid = str(raw.get("id") or "")
+        old = next((r for r in self.services if r["id"] == rid), None)
+        rep = {
+            "id": old["id"] if old else logic.new_id() + logic.new_id(),
+            "point": point, "date": date, "next_due": nxt if date_re.match(nxt) else "",
+            "title": str(raw.get("title") or "").strip()[:120] or "Service",
+            "work": str(raw.get("work") or "").strip()[:4000],
+            "readings": str(raw.get("readings") or "").strip()[:1000],
+            "items": items, "vat": bool(raw.get("vat", True)), "ref": str(raw.get("ref") or "").strip()[:40],
+            "tech": str(raw.get("tech") or "").strip()[:60] or ((user.name if user else None) or ""),
+            "users": [str(u)[:64] for u in (raw.get("users") or [])][:50],
+            "created": old["created"] if old else dt_util.now().isoformat(),
+            "updated": dt_util.now().isoformat(),
+        }
+        if old:
+            self.services[self.services.index(old)] = rep
+        else:
+            self.services.append(rep)
+        self._save()
+        self._recompute()
+        return rep
+
+    def service_delete(self, rid: str) -> None:
+        before = len(self.services)
+        self.services = [r for r in self.services if r["id"] != rid]
+        if len(self.services) == before:
+            raise ValueError("Report not found")
         self._save()
         self._recompute()
 
@@ -523,6 +595,9 @@ class FarmController:
             s["notify_service"] = svc
         if "alert_delay_s" in raw:
             s["alert_delay_s"] = max(0, min(3600, int(float(raw["alert_delay_s"]))))
+        for k, n in (("report_company", 80), ("report_contact", 160)):
+            if k in raw:
+                s[k] = str(raw[k] or "").strip()[:n]
         if "base" in raw:
             if raw["base"] not in ("satellite", "hybrid", "map"):
                 raise ValueError("unknown map style")
@@ -614,4 +689,5 @@ class FarmController:
             "tile_url": f"/api/hamlet_farm/tiles/{self.tile_token}",
             "photo_url": f"/api/hamlet_farm/photos/{self.tile_token}",
             "note_counts": {k: len(v) for k, v in self.notes.items() if v},
+            "service": self.service_summary(),
         }

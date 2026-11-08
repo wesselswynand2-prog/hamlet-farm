@@ -125,6 +125,12 @@ SPEC_KEYS = {
     "transformer": {"num": ("kva",), "txt": ("primary", "secondary", "vector", "serial")},
     # Eskom supply point: the client's Eskom account and the supply transformer on the pole
     "eskom": {"num": ("kva", "nmd"), "txt": ("account", "pole", "meter", "supply", "tariff")},
+    # installation details (shown on the point page and on service reports)
+    "pump": {"num": ("depth", "pump_depth", "water_level", "motor_kw", "yield"),
+             "txt": ("installed", "pump_model", "motor", "starter", "cable", "pipe", "serial", "installer")},
+    "booster": {"num": ("motor_kw",), "txt": ("installed", "pump_model", "motor", "starter", "pressure_set", "serial", "installer")},
+    "pivot": {"num": ("towers", "motor_kw"), "txt": ("installed", "make", "starter", "end_gun", "serial", "installer")},
+    "generator": {"num": ("kva",), "txt": ("installed", "make", "starter", "serial", "installer")},
 }
 
 

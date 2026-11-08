@@ -114,7 +114,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_delete_shapes, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
-                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete, ws_search,
+                    ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete, ws_search, ws_services, ws_service_save, ws_service_delete,
                     ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
 
@@ -308,3 +308,37 @@ def ws_doc_respond(hass, connection, msg):
 def ws_search(hass, connection, msg):
     if controller := _get(hass, connection, msg):
         connection.send_result(msg["id"], {"notes": controller.search_notes(msg["q"], connection.user)})
+
+
+# ------------------------------------------------------------------ service reports
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/services", vol.Required("entry_id"): str, vol.Optional("point"): str})
+@callback
+def ws_services(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        connection.send_result(msg["id"], {"services": controller.services_for(connection.user, msg.get("point")), "is_admin": connection.user.is_admin})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/service_save", vol.Required("entry_id"): str, vol.Required("report"): dict})
+@callback
+def ws_service_save(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            rep = controller.service_save(msg["report"], connection.user)
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"report": rep, "services": controller.services_for(connection.user, rep["point"])})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/service_delete", vol.Required("entry_id"): str, vol.Required("report_id"): str})
+@callback
+def ws_service_delete(hass, connection, msg):
+    if controller := _get(hass, connection, msg):
+        try:
+            controller.service_delete(msg["report_id"])
+        except ValueError as err:
+            connection.send_error(msg["id"], "invalid", str(err))
+            return
+        connection.send_result(msg["id"], {"ok": True})

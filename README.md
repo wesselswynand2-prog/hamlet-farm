@@ -68,6 +68,7 @@ Tap a pump, pivot, Eskom point – or a line, drawing or piece of land – to op
 
 - **Now:** live status, On / Off (or Auto / Run / On / Off for a linked Hamlet Pump) and the readings. A linked Hamlet Pump shows its full pump card too.
 - **About:** the notes from setup, the linked entities (tap one for Home Assistant's history graph) and GPS. **Directions** opens Google Maps navigation.
+- **Service:** service reports with work done, readings, parts, labour and pricing (VAT 15 %), next service due, print / save as PDF – prices only for the people you share them with. Installation details (installed on, borehole depth, pump depth, motor kW, pump / motor model, starter, cable, pipe) on the page and on every report.
 - **History:** graphs for 24 hours / 7 days / 30 days – running time and starts, power, kWh per hour / day, level, pressure, pivot position, supply voltage, extra sensors – with min / avg / max and a touch read-out.
 - **Site log:** anyone logged in can add a note – what was found, what was done, parts used – with a photo from the phone camera. Notes show who wrote them and when; the writer or an admin can delete one. Photos are shrunk on the phone before uploading and kept in `/config/hamlet_farm/` (in backups). Points with notes show a 📝 count in the list.
 

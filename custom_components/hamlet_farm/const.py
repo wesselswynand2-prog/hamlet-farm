@@ -1,6 +1,6 @@
 """Constants for Hamlet Farm."""
 DOMAIN = "hamlet_farm"
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 
 PANEL_URL_PATH = "hamlet-farm"
 PANEL_COMPONENT = "hamlet-farm-panel"

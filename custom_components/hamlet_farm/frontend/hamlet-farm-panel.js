@@ -1,6 +1,7 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
 import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
 import { HISTORY_CSS, renderHistory } from "./hamlet-farm-history.js";
+import { SERVICE_CSS, installFieldsHtml, installRows, hasService, serviceTabHtml, serviceViewHtml, serviceFormHtml, printReport, dueText, updateServiceTotals } from "./hamlet-farm-service.js";
 import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
@@ -295,7 +296,7 @@ class HamletFarmPanel extends HTMLElement {
 
   async _init() {
     const root = this.shadowRoot;
-    root.innerHTML = `<style>${STYLE}${HELP_CSS}${HISTORY_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
+    root.innerHTML = `<style>${STYLE}${HELP_CSS}${HISTORY_CSS}${SERVICE_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
       <div class="wrap">
         <div class="toolbar"><span id="menu"></span><div class="title">Farm map</div><div class="tabs" role="tablist"></div>
           <button class="tbtn" data-act="help" title="Manual and help"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Help</button>
@@ -580,12 +581,14 @@ class HamletFarmPanel extends HTMLElement {
         ${evs.map((e) => `<div class="ev"><i style="background:${e.cls === "ok" ? "var(--c-ok)" : e.cls === "warn" ? "var(--c-warn)" : e.cls === "offline" ? "#8a8f96" : "var(--c-bad)"}"></i>
           <div><b style="font-weight:500">${esc(e.name)}</b>: ${esc(e.text)}<div class="when">${dstr(e.t)}</div></div></div>`).join("")}
         ${ss.notify_service ? `<div class="small muted" style="margin-top:8px">Alerts are also sent to ${esc(ss.notify_service)}</div>` : ""}</section>` : ""}
-      ${this._isAdmin ? `<section class="card" id="settings"><h2>Alert settings<span class="sub">admin only</span></h2>
+      ${this._isAdmin ? `<section class="card" id="settings"><h2>Settings<span class="sub">admin only</span></h2>
         <div class="form">
           <div class="field"><label for="s_notify">Send alerts to</label><span class="hint">e.g. notify.mobile_app_wynand – blank = Home Assistant notifications only</span>
             <input type="text" id="s_notify" value="${esc(ss.notify_service || "")}" list="dl-notify" placeholder="notify.mobile_app_…"></div>
           <div class="field inline"><label for="s_delay">Alert after<span class="hint" style="display:block">Waits this long so a short blip doesn't alert</span></label>
             <span class="small muted"><input type="number" id="s_delay" min="0" max="3600" value="${esc(ss.alert_delay_s ?? 120)}"> s</span></div>
+          <div class="field"><label for="s_company">Company on service reports</label><input type="text" id="s_company" value="${esc(ss.report_company || "")}" maxlength="80" placeholder="e.g. Hamlet Elektries"></div>
+          <div class="field"><label for="s_contact">Contact on service reports</label><input type="text" id="s_contact" value="${esc(ss.report_contact || "")}" maxlength="160" placeholder="phone · email · website"></div>
           <div class="field inline"><label for="s_base">Map style for everyone</label>
             <select id="s_base" style="width:auto">${["satellite", "hybrid", "map"].map((b) => `<option value="${b}" ${ss.base === b ? "selected" : ""}>${b[0].toUpperCase() + b.slice(1)}</option>`).join("")}</select></div>
         </div>
@@ -832,7 +835,11 @@ class HamletFarmPanel extends HTMLElement {
         ${rows.length ? `<div style="margin-top:14px">${rows.join("")}</div>` : ""}
         ${cams.join("")}`);
     const sp = p.specs || {};
+    const inst = installRows(p); const svc = this._snap.service?.[p.id]; const due = dueText(svc?.next);
     this._setHTML(this.$("pg-info"), `<h2>About</h2>
+        ${inst.length ? `<h3 style="margin-top:0">Installation</h3>${inst.map(([k, v]) => `<div class="kv"><span class="muted">${esc(k)}</span><span>${esc(v)}</span></div>`).join("")}` : ""}
+        ${svc ? `<h3>Service</h3><div class="kv"><span class="muted">Last service</span><span>${esc(svc.last)} · ${esc(svc.title || "")}</span></div>
+          ${svc.next ? `<div class="kv"><span class="muted">Next service due</span><span style="${due.cls === "bad" ? "color:var(--c-bad)" : due.cls === "warn" ? "color:var(--c-warn)" : ""}">${esc(svc.next)} · ${esc(due.text)}</span></div>` : ""}` : ""}
         ${p.type === "transformer" && (sp.kva || sp.primary || sp.secondary) ? `
           ${sp.kva ? `<div class="kv"><span class="muted">Size</span><span>${esc(sp.kva)} kVA</span></div>` : ""}
           ${sp.primary || sp.secondary ? `<div class="kv"><span class="muted">Voltage</span><span>${esc(sp.primary || "?")} → ${esc(sp.secondary || "?")}</span></div>` : ""}
@@ -882,8 +889,9 @@ class HamletFarmPanel extends HTMLElement {
     const el = this.$("page");
     el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
       ${kind === "point" ? `<div class="htabs" role="tablist"><button role="tab" data-ptab="overview" aria-selected="true"><ha-icon icon="mdi:card-text-outline"></ha-icon>Overview</button>
+        ${hasService(this._point(id)?.type) ? `<button role="tab" data-ptab="service" aria-selected="false"><ha-icon icon="mdi:wrench-outline"></ha-icon>Service</button>` : ""}
         <button role="tab" data-ptab="history" aria-selected="false"><ha-icon icon="mdi:chart-line"></ha-icon>History</button></div>
-        <div id="pg-hist" hidden></div>` : ""}
+        <div id="pg-hist" hidden></div><div id="pg-svc" hidden></div>` : ""}
       <div class="pggrid" id="pg-grid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
         <div class="col"><section class="card" id="pg-log"><h2>Notes, photos &amp; files<span class="sub" id="pg-count"></span></h2>
           <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
@@ -903,6 +911,8 @@ class HamletFarmPanel extends HTMLElement {
     this._renderPage();
     this._loadNotes();
   }
+
+  _refreshSvcTab() { const box = this.$("pg-svc"); const p = this._pageTarget(); if (box && !box.hidden && p && this._services) this._setHTML(box, serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id])); }
 
   _renderHist() {
     const p = this._pageTarget(); if (!p || this._page?.kind !== "point") return;
@@ -1031,6 +1041,11 @@ class HamletFarmPanel extends HTMLElement {
   _renderDocModal() {
     const m = this._docModal; if (!m) return;
     const body = this.$("docbody");
+    if (m.svcForm) { this._setHTML(body, serviceFormHtml(m.svcForm, this._users || [], !m.svcForm.id)); return; }
+    if (m.svcView) {
+      const r = (this._services || []).find((x) => x.id === m.svcView); if (!r) { this._closeDoc(); return; }
+      this._setHTML(body, serviceViewHtml(r, this._point(r.point), this._isAdmin, this._users || [], this._confirm === `svc:${r.id}`)); return;
+    }
     if (m.form) {
       const f = m.form;
       const targets = [...this._snap.points.map((p) => [p.id, p.name]), ...this._snap.shapes.filter((x) => x.kind !== "sketch").map((x) => [x.id, x.name])];
@@ -1081,6 +1096,39 @@ class HamletFarmPanel extends HTMLElement {
         ${isQuote && d.status !== "new" ? `<button class="btn" data-act="docreset">Ask again</button>` : ""}
         <button class="btn danger" data-act="docdel" style="margin-left:auto">${conf("del") ? "Tap again to delete" : "Delete"}</button></div>` : ""}
       <div class="err" id="derr"></div>`);
+  }
+
+  /* ------------------------------------------------------------ service reports */
+  async _loadServices() {
+    const p = this._pageTarget(); if (!p) return;
+    if (this._isAdmin) await this._docUsers();
+    try {
+      const r = await this._hass.callWS({ type: `${DOMAIN}/services`, entry_id: this._entryId, point: p.id });
+      this._services = r.services;
+    } catch (e) { this._services = []; }
+    const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id]);
+  }
+
+  _readSvcForm() {
+    const f = this._docModal?.svcForm; if (!f) return;
+    const r = this.shadowRoot; const v = (id) => r.getElementById(id)?.value ?? "";
+    Object.assign(f, { date: v("sv_date"), ref: v("sv_ref").trim(), title: v("sv_title").trim(), work: v("sv_work"), readings: v("sv_read"),
+      next_due: v("sv_next"), tech: v("sv_tech").trim(), vat: !!r.getElementById("sv_vat")?.checked,
+      users: [...r.querySelectorAll("[data-svuser]")].filter((x) => x.checked).map((x) => x.dataset.svuser) });
+    r.querySelectorAll("[data-svi]").forEach((el) => { const it = f.items[Number(el.dataset.svi)]; if (it) it[el.dataset.k] = el.value; });
+  }
+
+  async _saveService() {
+    this._readSvcForm(); const f = this._docModal.svcForm; const p = this._pageTarget();
+    const btn = this.$("svsave"); btn.disabled = true;
+    try {
+      const r = await this._hass.callWS({ type: `${DOMAIN}/service_save`, entry_id: this._entryId,
+        report: { ...f, point: p.id, items: f.items.map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 })) } });
+      this._services = r.services;
+      this._docModal = { svcView: r.report.id }; this._renderDocModal();
+      const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id]);
+      this._toast("Service report saved");
+    } catch (e) { this.$("derr").textContent = e.message || String(e); btn.disabled = false; }
   }
 
   _readDocForm() {
@@ -1257,6 +1305,7 @@ class HamletFarmPanel extends HTMLElement {
           ${d.type === "pivot" ? `<div class="field inline"><label for="f_radius">Pivot radius<span class="hint" style="display:block">Centre to the last tower – draws the circle</span></label><span class="small muted"><input type="number" id="f_radius" data-f="radius" min="0" max="3000" value="${esc(d.radius)}"> m</span></div>` : ""}
           ${main.map(roleField).join("")}
         </div>
+        ${installFieldsHtml(d)}
         <details ${d.pump_entry || main.length === 0 ? "open" : ""}><summary>${d.pump_entry ? "Extra sensors" : "More sensors"}</summary><div class="form">${others.map(roleField).join("")}</div></details>
         <div class="form">
           <div class="field"><label for="f_extra">Also show</label><span class="hint">Any other entities, one per line – cameras show a picture, switches get a button</span>
@@ -1559,7 +1608,7 @@ class HamletFarmPanel extends HTMLElement {
     const d = this._draft; const root = this.shadowRoot;
     if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); if (root.getElementById("f_slen")) d.show_len = root.getElementById("f_slen").checked; if (root.getElementById("f_shid")) d.hidden = root.getElementById("f_shid").checked; if (root.getElementById("f_snotes")) d.notes = root.getElementById("f_snotes").value; return; }
     d.specs = d.specs || {};
-    root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = ["kva", "nmd"].includes(el.dataset.spec) ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
+    root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = el.type === "number" ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
     root.querySelectorAll("[data-f]").forEach((el) => {
       const f = el.dataset.f;
@@ -1583,6 +1632,9 @@ class HamletFarmPanel extends HTMLElement {
       this.$("nfv").innerHTML = `<span class="chipfile"><ha-icon icon="${f.type === "application/pdf" ? "mdi:file-pdf-box" : "mdi:file-image-outline"}"></ha-icon>${esc(f.name)} <small>${fmtMB(f.size)}</small><button data-act="notefilex" aria-label="Remove file">×</button></span>`;
       return;
     }
+    if (this._docModal?.svcForm && (el?.dataset?.svi !== undefined || el?.id === "sv_vat")) {
+      this._readSvcForm(); updateServiceTotals(this.shadowRoot, this._docModal.svcForm); return;
+    }
     if (el?.dataset?.layer && ev.type === "change") {
       this._layers[el.dataset.layer] = el.checked; this._saveLayers(); this._renderLayers(); return;
     }
@@ -1600,7 +1652,7 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
-      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange", "nfile"];
+      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange", "nfile", "svc", "svdel", "svquick", "svnext"];
     const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
@@ -1616,12 +1668,17 @@ class HamletFarmPanel extends HTMLElement {
     if (ds.ptab && this._page) {
       this._page.tab = ds.ptab;
       this.shadowRoot.querySelectorAll("[data-ptab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.ptab === ds.ptab)));
-      this.$("pg-grid").hidden = ds.ptab !== "overview"; this.$("pg-hist").hidden = ds.ptab !== "history";
+      this.$("pg-grid").hidden = ds.ptab !== "overview"; this.$("pg-hist").hidden = ds.ptab !== "history"; this.$("pg-svc").hidden = ds.ptab !== "service";
       if (ds.ptab === "history") this._renderHist();
+      if (ds.ptab === "service") this._loadServices();
       return;
     }
     if (ds.hrange && this._page) { this._histState.range = ds.hrange; this._renderHist(); return; }
     if (ds.nfile) { this._viewFile(`/api/${DOMAIN}/file/${this._entryId}/${encodeURIComponent(ds.nfile)}`, ds.fname); return; }
+    if (ds.svc) { this._docModal = { svcView: ds.svc }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); return; }
+    if (ds.svdel !== undefined && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.items.splice(Number(ds.svdel), 1); this._renderDocModal(); return; }
+    if (ds.svquick && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.items.push({ desc: ds.svquick, qty: 1, price: "" }); this._renderDocModal(); return; }
+    if (ds.svnext && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.next_due = ds.svnext; this._renderDocModal(); return; }
     if (ds.doc) { this._openDoc(ds.doc); return; }
     if (ds.copy) { try { await navigator.clipboard.writeText(ds.copy); this._toast("Copied"); } catch (e) { this._toast(ds.copy); } return; }
     if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }
@@ -1699,6 +1756,27 @@ class HamletFarmPanel extends HTMLElement {
         if (this._pen.plan && !this._layers.planning) { this._layers.planning = true; this._saveLayers(); this._toast("Planning lines are shown – switch them off under Layers"); }
         this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "svcnew": case "svcedit": case "svccopy": {
+        await this._docUsers();
+        const base = ds.act === "svcnew" ? null : this._services.find((r) => r.id === this._docModal?.svcView);
+        const today = new Date().toISOString().slice(0, 10);
+        const f = base ? JSON.parse(JSON.stringify(base)) : { date: today, title: "", work: "", readings: "", items: [{ desc: "Labour", qty: 1, price: "" }], vat: true, next_due: "", tech: this._hass.user?.name || "", ref: "", users: [] };
+        if (ds.act === "svccopy") { delete f.id; f.date = today; f.next_due = ""; f.ref = ""; }
+        f.users = f.users || [];
+        this._docModal = { svcForm: f }; this.$("docmodal").hidden = false; this._renderDocModal();
+        break;
+      }
+      case "svcadd": this._readSvcForm(); this._docModal.svcForm.items.push({ desc: "", qty: 1, price: "" }); this._renderDocModal(); break;
+      case "svcsave": this._saveService(); break;
+      case "svcprint": { const r = this._services.find((x) => x.id === this._docModal.svcView); if (r) printReport(r, this._point(r.point), this._snap.name, this._snap.settings); break; }
+      case "svcdel": {
+        const id = this._docModal.svcView; const key = `svc:${id}`;
+        if (this._confirm !== key) { this._confirm = key; this._renderDocModal(); return; }
+        this._confirm = null;
+        try { await this._hass.callWS({ type: `${DOMAIN}/service_delete`, entry_id: this._entryId, report_id: id }); this._closeDoc(); this._loadServices(); this._toast("Report deleted"); }
+        catch (e) { this.$("derr").textContent = e.message; }
+        break;
+      }
       case "help": case "helpat": {
         if (ev.preventDefault) ev.preventDefault();
         const h = this.$("help"); h.hidden = false; h.scrollTop = 0;
@@ -1848,7 +1926,8 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "savesettings":
         try {
-          await this._ws("save_settings", { settings: { notify_service: this.$("s_notify").value.trim(), alert_delay_s: Number(this.$("s_delay").value) || 0, base: this.$("s_base").value } });
+          await this._ws("save_settings", { settings: { notify_service: this.$("s_notify").value.trim(), alert_delay_s: Number(this.$("s_delay").value) || 0, base: this.$("s_base").value,
+            report_company: this.$("s_company").value.trim(), report_contact: this.$("s_contact").value.trim() } });
           this._baseOverride = null; try { localStorage.removeItem("hamlet_farm_base"); } catch (e) { /* ignore */ }
           this._toast("Saved");
         } catch (e) { this.$("serr").textContent = e.message; }

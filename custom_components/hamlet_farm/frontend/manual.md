@@ -47,6 +47,13 @@ Tap a pump, pivot, Eskom point or any line to open its page. **Map** (top left) 
 - **Directions:** opens Google Maps navigation to the point (needs mobile data).
 - **Report to Eskom** (Eskom points): calls 08600 37566 – the account, meter and pole number are on the same page.
 
+## Service reports {icon:mdi:wrench-outline}
+
+Pumps, pivots and other equipment have a **Service** tab on their page.
+
+- **Everyone** sees the last service date and when the next service is due (orange within 30 days, red when overdue) – on the *Overview* under *About*, with the installation details (installed on, borehole depth, pump depth, water level, yield, motor size, pump and motor model, starter, cable, pipe).
+- **Service reports** with the work done, readings, parts, labour and **prices** are only shown to the people the installer shared them with (and admins). Tap a report to see it, and **Print / save as PDF** for a printable copy with a signature line.
+
 ## Notes, photos and files {icon:mdi:note-text-outline}
 
 Every point and line has a **site log** (*Notes, photos & files*) on its page. Anyone logged in can add to it. In Edit, **Notes, photos & files** in a point's or line's settings goes straight there.
@@ -116,6 +123,21 @@ height: 400
 
 **Pivot:** set the **radius** (centre to the last tower) so the circle is drawn to size. **Tank:** set **Low level alert below**.
 
+## Installation details and service reports {admin} {icon:mdi:clipboard-text-outline}
+
+**Installation details** – Edit → tap the pump / pivot → **Installation details**: installed on, borehole depth, pump installed at, static water level, yield, motor size (kW), motor and pump make / model, starter (DOL, star-delta, soft starter, VFD, pump controller, pressure / float switch), cable, delivery pipe, serial number, installed by. Pivots: make / model, towers, motor, starter, end gun. They show on the point's page and on every service report.
+
+**New service report** – open the point → **Service** tab → **New report**:
+
+1. Date, reference / job card number and a title (e.g. *6-month service, new non-return valve*).
+2. **Work done** and **Readings** (amps per phase, pressure, water level, insulation…).
+3. **Parts & labour**: a line per item with quantity and price – **+ Labour**, **+ Call-out** and **+ Travel** add the usual lines. Subtotal, **VAT 15 %** (switch off if not VAT registered) and total are worked out as you type.
+4. **Next service due** – pick a date or tap **6 mo** / **1 yr**.
+5. **Who may see it** – tick the client's people. Prices are only shown to them and admins.
+6. **Save report.** Open it to **Print / save as PDF**, **Edit**, **Copy** (start the next report from this one) or **Delete**.
+
+Put your **company name** and **contact details** for the top of the printed report under **Settings** at the bottom of the list.
+
 ## Lines, cables and land {admin} {icon:mdi:vector-polyline}
 
 1. **Edit → Line / land.**
@@ -176,9 +198,11 @@ Turn a photo off with the eye, or delete it, in the same list.
 
 **Admins always see every document**, so give the client's people normal (non-admin) accounts.
 
-## Alert settings {admin} {icon:mdi:bell-cog-outline}
+## Settings {admin} {icon:mdi:bell-cog-outline}
 
 At the bottom of the list (admins only):
+
+- **Company / contact on service reports:** printed at the top of every service report.
 
 - **Send alerts to:** a phone, e.g. `notify.mobile_app_wynand` – blank = Home Assistant notifications only.
 - **Alert after:** how long a problem must last before it alerts (default 120 s).

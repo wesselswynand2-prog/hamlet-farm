@@ -363,3 +363,37 @@ async def test_planning_lines_hidden_from_clients(hass: HomeAssistant, hass_ws_c
     await ws.send_json({"id": 21, "type": f"{DOMAIN}/delete_shapes", "entry_id": entry.entry_id, "shape_ids": [s["id"] for s in shapes if s.get("hidden")]})
     r = await _reply(ws, 21)
     assert r["success"] and r["result"]["result"] == 2 and len(r["result"]["shapes"]) == 1
+
+
+
+async def test_service_reports(hass: HomeAssistant, hass_ws_client, hass_read_only_access_token, hass_read_only_user):
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/save_point", "entry_id": entry.entry_id, "point": {
+        "name": "Borehole 1", "type": "pump", "lat": -25.7, "lng": 28.2,
+        "specs": {"installed": "2021-03-12", "depth": "120", "pump_depth": 84, "motor_kw": 7.5, "starter": "Soft starter", "bogus": 1}}})
+    p = (await _reply(ws, 1))["result"]["result"]
+    assert p["specs"] == {"depth": 120, "pump_depth": 84, "motor_kw": 7.5, "installed": "2021-03-12", "starter": "Soft starter"}
+    rep = {"point": p["id"], "date": "2026-11-08", "next_due": "2027-05-08", "title": "Pump pulled, new non-return valve",
+           "work": "Pulled pump, replaced NRV", "items": [{"desc": "NRV 50 mm", "qty": 1, "price": 850}, {"desc": "Labour", "qty": 4, "price": 450}],
+           "users": [hass_read_only_user.id]}
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/service_save", "entry_id": entry.entry_id, "report": rep})
+    r = await _reply(ws, 2)
+    assert r["success"], r
+    rid = r["result"]["report"]["id"]
+    await ws.send_json({"id": 3, "type": f"{DOMAIN}/service_save", "entry_id": entry.entry_id, "report": {**rep, "users": [], "date": "2026-01-02", "title": "Internal check"}})
+    assert (await _reply(ws, 3))["success"]
+    await ws.send_json({"id": 4, "type": f"{DOMAIN}/service_save", "entry_id": entry.entry_id, "report": {**rep, "date": "yesterday"}})
+    assert not (await _reply(ws, 4))["success"]
+    await ws.send_json({"id": 5, "type": f"{DOMAIN}/state", "entry_id": entry.entry_id})
+    st = (await _reply(ws, 5))["result"]
+    assert st["service"][p["id"]] == {"last": "2026-11-08", "title": "Pump pulled, new non-return valve", "next": "2027-05-08"}
+
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/services", "entry_id": entry.entry_id, "point": p["id"]})
+    lst = (await _reply(ro, 1))["result"]["services"]
+    assert [x["title"] for x in lst] == ["Pump pulled, new non-return valve"] and "users" not in lst[0]
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/service_save", "entry_id": entry.entry_id, "report": rep})
+    assert (await _reply(ro, 2))["error"]["code"] == "unauthorized"
+    await ws.send_json({"id": 6, "type": f"{DOMAIN}/service_delete", "entry_id": entry.entry_id, "report_id": rid})
+    assert (await _reply(ws, 6))["success"]
