@@ -461,3 +461,39 @@ export class FarmMap {
   }
   centre() { const c = this.map.getCenter(); return { lat: c.lat, lng: c.lng, zoom: this.map.getZoom() }; }
 }
+
+/**
+ * Read GPS coordinates typed or pasted in any common form. Returns { lat, lng } or null.
+ *  -25.861234, 28.103456   |   -25.861234 28.103456
+ *  25°51'40.4"S 28°06'12.4"E   |   S25 51 40.4 E28 06 12.4   |   S 25° 51.673' E 28° 6.207'
+ *  a Google Maps link (…/@-25.86,28.10,15z or ?q=-25.86,28.10)
+ */
+export function parseGPS(text) {
+  let s = String(text || "").trim();
+  if (!s) return null;
+  const ok = (lat, lng) => (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null);
+  // plain decimal pair
+  let m = s.match(/^\s*(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+  if (m && (!(m[1].includes(",") && m[2].includes(",")) || s.includes(";"))) return ok(Number(m[1].replace(",", ".")), Number(m[2].replace(",", ".")));
+  // a link or text with "lat,lng" inside
+  if (/https?:|maps|@/i.test(s)) {
+    m = s.match(/(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
+    if (m) return ok(Number(m[1]), Number(m[2]));
+  }
+  // degrees / minutes / seconds with N S E W
+  s = s.toUpperCase().replace(/[°º˚]/g, " ").replace(/[′'’]/g, " ").replace(/[″"”]/g, " ").replace(/,/g, " ");
+  if (/^[NSEW]/.test(s)) s = s.replace(/([NSEW])\s*([^NSEW]+)/g, "$2$1 ");   // letter before the numbers -> after
+  const parts = s.split(/(?<=[NSEW])/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const val = (p) => {
+    const hemi = p.slice(-1); const nums = (p.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+    if (!nums.length || nums.length > 3 || !"NSEW".includes(hemi)) return null;
+    const v = nums[0] + (nums[1] || 0) / 60 + (nums[2] || 0) / 3600;
+    return { hemi, v: hemi === "S" || hemi === "W" ? -v : v };
+  };
+  const a = val(parts[0]), b = val(parts[1]);
+  if (!a || !b) return null;
+  const lat = "NS".includes(a.hemi) ? a : b, lng = "EW".includes(a.hemi) ? a : b;
+  if (lat === lng) return null;
+  return ok(+lat.v.toFixed(7), +lng.v.toFixed(7));
+}

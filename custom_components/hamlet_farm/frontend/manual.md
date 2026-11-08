@@ -95,9 +95,9 @@ height: 400
 1. **Settings → Devices & services → Add integration → Hamlet Farm**, give the farm a name.
 2. Open **Farm map** → **Edit** (top right – admins only).
 3. Find the farm (search a place or GPS, or zoom in) and tap **Start view** so the map always opens there.
-4. **Point** → tap where the pump / pivot / Eskom point is, or **Where I stand** on site to use the phone's GPS.
+4. **Point** → tap where the pump / pivot / Eskom point is, **type its GPS** in the bar and tap **Add**, or **Where I stand** on site to use the phone's GPS. GPS can be typed or pasted as `-25.861234, 28.103456`, `25°51'40"S 28°06'12"E`, `S25 51 40 E28 06 12`, or a Google Maps link.
 5. Pick the **type**, give it a **name** and link the sensors (below). **Save.**
-6. Drag points to move them. Tap a point in Edit to change or delete it.
+6. Drag points to move them – or change **GPS position** in the point's settings (under the name) and tap **Move**. Tap a point in Edit to change or delete it.
 
 **Linking sensors** – start typing in a field and pick from the list; the value now is shown next to it. Everything is optional:
 

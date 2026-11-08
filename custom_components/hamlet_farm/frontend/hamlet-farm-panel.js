@@ -1,7 +1,7 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
 import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
 import { HISTORY_CSS, renderHistory } from "./hamlet-farm-history.js";
-import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea } from "./hamlet-farm-map.js";
+import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
@@ -101,6 +101,7 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .banner { background: rgba(20,24,28,.88); color: #fff; border-radius: 12px; padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   box-shadow: 0 2px 10px rgba(0,0,0,.45); max-width: 640px; }
 .banner b { font-weight: 500; }
+.banner #gpsin::placeholder { color: rgba(255,255,255,.6); }
 .banner .kindsel { width: auto; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); padding: 5px 8px; font-size: 14px; }
 .banner .kindsel option { color: #000; }
 .banner .btn { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }
@@ -327,6 +328,14 @@ class HamletFarmPanel extends HTMLElement {
     root.addEventListener("input", (ev) => this._input(ev));
     root.addEventListener("change", (ev) => this._input(ev));
     root.getElementById("search").addEventListener("submit", (ev) => { ev.preventDefault(); this._searchEnter(); });
+    root.addEventListener("submit", (ev) => {
+      if (ev.target?.id !== "gpsform") return;
+      ev.preventDefault();
+      const g = parseGPS(this.$("gpsin").value);
+      if (!g) { this._toast("Couldn't read that GPS – e.g. -25.861234, 28.103456"); return; }
+      this._fm.map.flyTo([g.lat, g.lng], 17);
+      this._newPoint(g.lat, g.lng);
+    });
     const qi = root.getElementById("q");
     qi.addEventListener("input", () => this._searchInput());
     qi.addEventListener("focus", () => { if (qi.value.trim()) this._searchInput(); });
@@ -507,7 +516,9 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="drawundo" ${n ? "" : "disabled"}>Undo</button><button class="btn" data-act="drawcancel">Cancel</button>
         <button class="btn primary" data-act="drawdone" ${n >= need ? "" : "disabled"}>Finish</button></div>`;
     } else if (this._placing) {
-      html = `<div class="banner"><ha-icon icon="mdi:map-marker-plus"></ha-icon><span>Tap the map where the new point goes</span>
+      html = `<div class="banner"><ha-icon icon="mdi:map-marker-plus"></ha-icon><span>Tap the map where the new point goes, or type its GPS:</span>
+        <form id="gpsform" style="display:flex;gap:6px;flex:1;min-width:220px"><input type="text" id="gpsin" placeholder="-25.861234, 28.103456" autocomplete="off" spellcheck="false"
+          style="flex:1;min-width:0;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3)"><button class="btn primary" type="submit">Add</button></form>
         <button class="btn" data-act="gpsplace"><ha-icon icon="mdi:crosshairs-gps"></ha-icon>Where I stand</button><button class="btn" data-act="placecancel">Cancel</button></div>`;
     } else if (this._edit) {
       html = `<div class="banner"><ha-icon icon="mdi:pencil"></ha-icon><span><b>Editing</b> – drag to move, tap to change</span>
@@ -1202,6 +1213,9 @@ class HamletFarmPanel extends HTMLElement {
         <div class="typegrid">${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" aria-pressed="${d.type === k}"><ha-icon icon="${v.icon}"></ha-icon>${v.label}</button>`).join("")}</div>
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_name">Name</label><input type="text" id="f_name" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(t.label)}"></div>
+          <div class="field"><label for="f_gps">GPS position</label><span class="hint">Type or paste: -25.861234, 28.103456 · 25°51'40"S 28°06'12"E · a Google Maps link – or drag the point on the map</span>
+            <div class="ent"><input type="text" id="f_gps" value="${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}" autocomplete="off" spellcheck="false" inputmode="text">
+            <button class="btn" data-act="gpsset" style="padding:6px 12px">Move</button></div><div class="err" id="gpserr"></div></div>
           ${["pump", "booster", "other"].includes(d.type) && this._pumps.length ? `<div class="field"><label for="f_pump">Hamlet Pump</label><span class="hint">Link a pump from the Pumps page – status, protection and modes come from there</span>
             <select id="f_pump" data-f="pump_entry"><option value="">– not linked –</option>${this._pumps.map((pp) => `<option value="${esc(pp.entry_id)}" ${d.pump_entry === pp.entry_id ? "selected" : ""}>${esc(pp.name)}</option>`).join("")}</select></div>` : ""}
           ${d.type === "transformer" ? `
@@ -1236,7 +1250,7 @@ class HamletFarmPanel extends HTMLElement {
             <textarea id="f_cards" data-f="cards" rows="${d.cards ? 8 : 2}" spellcheck="false" style="font-family:monospace;font-size:12px" placeholder="type: custom:panel-meter-card">${esc(d.cards || "")}</textarea>
             <div class="actions" style="margin-top:4px"><button class="btn" data-act="cardmeter" style="padding:4px 12px"><ha-icon icon="mdi:gauge"></ha-icon>Add panel meter</button></div></div>
           <div class="field"><label for="f_notes">Notes</label><textarea id="f_notes" data-f="notes" maxlength="500" placeholder="e.g. 7.5 kW submersible, 80 m deep. Key at the farm office.">${esc(d.notes)}</textarea></div>
-          <div class="field inline"><span class="small muted">GPS ${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}</span><span class="small muted">drag on the map to move</span></div>
+
         </div>
         ${lists}
         <div class="actions">
@@ -1345,6 +1359,18 @@ class HamletFarmPanel extends HTMLElement {
     const res = await this._hass.callWS({ type: `${DOMAIN}/${type}`, entry_id: this._entryId, ...extra });
     this._apply(res);
     return res.result;
+  }
+
+  _gpsMove(g) {
+    this._readForm(); this._draft.lat = g.lat; this._draft.lng = g.lng;
+    this._fm.update(this._mapSnap());
+    if (this._point(this._draft.id)) {   // also move the saved marker so the preview matches
+      const m = this._fm.markers.get(this._draft.id); if (m) m.setLatLng([g.lat, g.lng]);
+    }
+    this._fm.map.flyTo([g.lat, g.lng], Math.max(this._fm.map.getZoom(), 17));
+    this._setHTML(this.$("side"), ""); this._renderSide();
+    const warn = g.lat > 0 && g.lat < 36 && g.lng > 15 && g.lng < 34 ? "That is north of the equator – in South Africa the first number is negative (e.g. -25.86)." : "";
+    this._toast(warn || "Moved – tap Save to keep it");
   }
 
   _gps() {
@@ -1531,6 +1557,7 @@ class HamletFarmPanel extends HTMLElement {
     if (el?.dataset?.layer && ev.type === "change") {
       this._layers[el.dataset.layer] = el.checked; this._saveLayers(); this._renderLayers(); return;
     }
+    if (el?.id === "f_gps" && ev.type === "change") { const g = parseGPS(el.value); if (g) this._gpsMove(g); else this.$("gpserr").textContent = "Couldn't read that – e.g. -25.861234, 28.103456"; return; }
     if (el?.id === "drawkind" && this._draw) { this._draw.kind = el.value; this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
     if ((el?.id === "offname" || el?.id === "offsrc") && this._off) { this._off[el.id === "offname" ? "name" : "credit"] = el.value; return; }
@@ -1736,6 +1763,11 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "addpoint": this._placing = true; this._draft = null; this._renderBanner(); this._renderSide(); break;
       case "placecancel": this._placing = false; this._renderBanner(); break;
+      case "gpsset": {
+        const g = parseGPS(this.$("f_gps").value);
+        if (!g) { this.$("gpserr").textContent = "Couldn't read that – e.g. -25.861234, 28.103456"; return; }
+        this._gpsMove(g); break;
+      }
       case "gpsplace":
         try { const c = await this._gps(); this._fm.map.flyTo([c.latitude, c.longitude], 18); this._newPoint(c.latitude, c.longitude); } catch (e) { this._toast(e.message); }
         break;
