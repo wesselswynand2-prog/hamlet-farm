@@ -112,7 +112,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
         return
     hass.data[DOMAIN]["_ws"] = True
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
-                    ws_delete_shape, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
+                    ws_delete_shape, ws_delete_shapes, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
                     ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete,
                     ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
@@ -128,7 +128,7 @@ def ws_list(hass, connection, msg):
 @callback
 def ws_state(hass, connection, msg):
     if controller := _get(hass, connection, msg):
-        connection.send_result(msg["id"], {**controller.snapshot(), "is_admin": connection.user.is_admin,
+        connection.send_result(msg["id"], {**controller.snapshot_for(connection.user), "is_admin": connection.user.is_admin,
                                            "pumps": controller.pump_list()})
 
 
@@ -141,7 +141,7 @@ def ws_subscribe(hass, connection, msg):
 
     @callback
     def forward() -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], controller.snapshot()))
+        connection.send_message(websocket_api.event_message(msg["id"], controller.snapshot_for(connection.user)))
 
     connection.subscriptions[msg["id"]] = controller.add_listener(forward)
     connection.send_result(msg["id"])
@@ -172,6 +172,7 @@ ws_save_point = _edit("save_point", {vol.Required("point"): dict})
 ws_delete_point = _edit("delete_point", {vol.Required("point_id"): str})
 ws_save_shape = _edit("save_shape", {vol.Required("shape"): dict})
 ws_delete_shape = _edit("delete_shape", {vol.Required("shape_id"): str})
+ws_delete_shapes = _edit("delete_shapes", {vol.Required("shape_ids"): [str]})
 ws_save_view = _edit("save_view", {vol.Required("view"): dict})
 ws_save_settings = _edit("save_settings", {vol.Required("settings"): dict})
 ws_offline_create = _edit("offline_create", {vol.Required("layer"): dict})

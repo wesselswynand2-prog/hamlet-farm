@@ -316,3 +316,26 @@ async def test_quotes(hass: HomeAssistant, hass_ws_client, hass_client, hass_rea
     assert (await _reply(ws, 5))["success"]
     import os
     assert not os.path.exists(hass.config.path("hamlet_farm", entry.entry_id, "docs", shared["id"]))
+
+
+
+async def test_planning_lines_hidden_from_clients(hass: HomeAssistant, hass_ws_client, hass_read_only_access_token):
+    entry = await _setup(hass)
+    ws = await hass_ws_client(hass)
+    for i, hidden in enumerate((False, True, True)):
+        await ws.send_json({"id": 10 + i, "type": f"{DOMAIN}/save_shape", "entry_id": entry.entry_id,
+                            "shape": {"kind": "sketch", "hidden": hidden, "coords": [[-25.7, 28.2], [-25.71, 28.21]]}})
+        assert (await _reply(ws, 10 + i))["success"]
+    await ws.send_json({"id": 20, "type": f"{DOMAIN}/state", "entry_id": entry.entry_id})
+    shapes = (await _reply(ws, 20))["result"]["shapes"]
+    assert len(shapes) == 3
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/state", "entry_id": entry.entry_id})
+    assert len((await _reply(ro, 1))["result"]["shapes"]) == 1
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/subscribe", "entry_id": entry.entry_id})
+    assert (await _reply(ro, 2))["success"]
+    ev = await ro.receive_json()
+    assert len(ev["event"]["shapes"]) == 1
+    await ws.send_json({"id": 21, "type": f"{DOMAIN}/delete_shapes", "entry_id": entry.entry_id, "shape_ids": [s["id"] for s in shapes if s.get("hidden")]})
+    r = await _reply(ws, 21)
+    assert r["success"] and r["result"]["result"] == 2 and len(r["result"]["shapes"]) == 1

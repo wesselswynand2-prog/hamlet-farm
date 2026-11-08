@@ -104,6 +104,7 @@ export function loadLeaflet() {
 export const MAP_CSS = `
 .hf-map { position: absolute; inset: 0; background: #1d2a1f; }
 .leaflet-container { font: inherit; }
+.leaflet-interactive:focus { outline: none; }
 .leaflet-control-attribution { font-size: 10px; }
 .hf-mk { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: var(--mc); border: 2px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.55); color: #fff; position: relative; transition: transform .15s; }
@@ -291,31 +292,34 @@ export class FarmMap {
     const L = this.L;
     const seen = new Set();
     for (const s of shapes) {
+      if (this.shapeFilter && !this.shapeFilter(s)) continue;
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len]);
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len, s.hidden]);
       const old = this.shapes.get(s.id);
       if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
       const d = SHAPES[s.kind] || SHAPES.pipe;
       const color = s.kind === "sketch" && s.color ? s.color : d.color;
-      const opts = { color, weight: d.weight, dashArray: d.dash, opacity: 0.95, lineCap: "round", lineJoin: "round" };
+      const opts = { color, weight: d.weight, dashArray: d.dash, opacity: s.hidden ? 0.6 : 0.95, lineCap: "round", lineJoin: "round" };
+      // wide invisible line on top, so a thin line is easy to tap
+      const hit = () => { const h = L.polyline(s.coords, { opacity: 0, weight: 20, lineCap: "round" }); h.on("click", (e) => this._shapeHit(e, s.id)); return h; };
       let layer;
       if (s.kind === "field") {
         layer = L.polygon(s.coords, { ...opts, fillColor: d.color, fillOpacity: 0.12 });
         layer.bindTooltip(`${esc(s.name)}<br><small>${fmtArea(areaM2(s.coords))}</small>`, { permanent: true, direction: "center", className: "hf-field-lbl" });
       } else if (s.kind === "sketch") {
         const casing = L.polyline(s.coords, { color: color === "#000000" ? "#fff" : "#000", weight: d.weight + 2, opacity: 0.3, interactive: false, lineCap: "round", lineJoin: "round" });
-        const line = L.polyline(s.coords, opts);
-        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
-        layer = L.layerGroup([casing, line]);
-        line.on("click", (e) => this._shapeHit(e, s.id));
+        const line = L.polyline(s.coords, { ...opts, interactive: false });
+        const h = hit();
+        h.bindTooltip(`${esc(s.name)}${s.hidden ? " (planning)" : ""} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
+        layer = L.layerGroup([casing, line, h]);
       } else {
         // dark casing underneath so lines read on satellite imagery
         const casing = L.polyline(s.coords, { color: "#000", weight: d.weight + 2.5, opacity: 0.35, interactive: false });
-        const line = L.polyline(s.coords, opts);
-        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}${s.info ? `<br><small>${esc(s.info)}</small>` : ""}`, { sticky: true });
-        layer = L.layerGroup([casing, line]);
-        line.on("click", (e) => this._shapeHit(e, s.id));
+        const line = L.polyline(s.coords, { ...opts, interactive: false });
+        const h = hit();
+        h.bindTooltip(`${esc(s.name)}${s.hidden ? " (planning)" : ""} · ${fmtDist(lineLength(s.coords))}${s.info ? `<br><small>${esc(s.info)}</small>` : ""}`, { sticky: true });
+        layer = L.layerGroup([casing, line, h]);
       }
       if (s.kind === "field") layer.on("click", (e) => this._shapeHit(e, s.id));
       if (s.show_len && s.kind !== "field" && s.coords.length > 1) {
@@ -331,9 +335,9 @@ export class FarmMap {
   }
 
   /** Offline farm photos stored on Home Assistant. */
-  setOffline(layers, tileUrl) {
+  setOffline(layers, tileUrl, show = true) {
     const L = this.L;
-    const want = new Map((layers || []).filter((l) => l.visible !== false).map((l) => [l.id, l]));
+    const want = new Map((show ? layers || [] : []).filter((l) => l.visible !== false).map((l) => [l.id, l]));
     for (const [id, tl] of this.offline) if (!want.has(id)) { this.map.removeLayer(tl); this.offline.delete(id); }
     for (const [id, l] of want) {
       if (this.offline.has(id)) continue;

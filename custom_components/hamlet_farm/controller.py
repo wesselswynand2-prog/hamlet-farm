@@ -308,6 +308,15 @@ class FarmController:
         self._changed()
         return shape
 
+    def delete_shapes(self, ids: list) -> int:
+        ids = {str(i) for i in ids}
+        before = len(self.shapes)
+        self.shapes = [s for s in self.shapes if s["id"] not in ids]
+        for i in ids:
+            self._drop_notes(i)
+        self._changed()
+        return before - len(self.shapes)
+
     def delete_shape(self, sid: str) -> None:
         self.shapes = [s for s in self.shapes if s["id"] != sid]
         self._drop_notes(sid)
@@ -546,6 +555,13 @@ class FarmController:
         await self.hass.async_add_executor_job(offline.remove_tree, offline.layer_dir(self.hass, self.entry.entry_id, layer_id))
 
     # ------------------------------------------------------------ snapshot
+    def snapshot_for(self, user) -> dict:
+        """Snapshot for one user: planning (hidden) lines only go to admins."""
+        snap = self.snapshot()
+        if not (user and user.is_admin):
+            snap["shapes"] = [s for s in snap["shapes"] if not s.get("hidden")]
+        return snap
+
     def snapshot(self) -> dict:
         return {
             "entry_id": self.entry.entry_id,

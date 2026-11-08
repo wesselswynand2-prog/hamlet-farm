@@ -105,6 +105,12 @@ Who can see what: only the users you ticked, plus **every admin** of that Home A
 - **Draw** (admin, Edit → **Draw**): drag a finger or the mouse to draw on the map in red, yellow, white, green, blue, orange or black – mark a leak, a new trench or where to dig. **Length** (on by default) writes each line's length next to it while you draw and on the map afterwards; the bar shows the last line's length. **Undo** takes back the last stroke; tap a drawing in edit mode to rename, recolour, turn the length on / off or delete it.
 - Saved lines show their length when you hover or tap them (or always, with *Show the length on the map* in the line's settings), and land shows its hectares. While drawing a line with **Line / land**, the bar shows the length so far.
 
+## Layers, planning lines and deleting drawings
+
+- **Layers** button (top right of the map): tick what to show – names, drawings, water pipes, cables, overhead lines, fences, roads, land, the offline photo. Remembered per phone / PC.
+- **Planning lines** (admin): lines and drawings for planning or a demonstration can be marked *Planning / demo only* – in the line's settings, or with **Planning** in the Draw bar. They are hidden from the map; an admin shows them by ticking *Planning lines* under Layers. Clients never see them (not on the map page and not on the dashboard card).
+- **Delete a line or drawing:** Edit → tap the line (thin drawings are easy to hit now) → **Delete** (tap twice). **Delete all drawings** under Layers clears every freehand drawing at once.
+
 ## Alerts
 
 A point with *Alert when this point has a problem* on (default) alerts when it is **faulted, has no power, is offline or low** for longer than *Alert after* (default 2 min, so a blip doesn't alert), and again when it's back to normal. Alerts show on the map page, as Home Assistant notifications and, if set, on a phone via *Send alerts to* (e.g. `notify.mobile_app_wynand`).

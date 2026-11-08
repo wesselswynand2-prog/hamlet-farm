@@ -52,6 +52,7 @@ class HamletFarmCard extends HTMLElement {
       const L = await loadLeaflet();
       this._fm = new FarmMap(L, root.getElementById("map"), { onSelect: (id) => this._popup(id), interactive: true });
       this._fm.map.scrollWheelZoom.disable();
+      this._fm.shapeFilter = (sh) => !sh.hidden;   // planning lines never on the dashboard card
       this._fm.setLabels(this._config.labels !== false);
       const s = await this._hass.callWS({ type: `${DOMAIN}/state`, entry_id: this._entryId });
       this._apply(s, true);
