@@ -203,6 +203,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 14px; }
 .note .nb { flex: 1; min-width: 0; } .note .who { font-size: 14px; } .note .who b { font-weight: 500; } .note .who span { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .note p { margin: 4px 0 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chipfile { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; max-width: 100%; }
+.chipfile small { color: var(--muted); }
+.chipfile button { background: none; border: 0; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 2px; }
+button.chipfile { background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+button.chipfile:hover { border-color: var(--accent); }
+.chipfile ha-icon { --mdc-icon-size: 20px; color: var(--accent); flex: none; }
 .note img { margin-top: 8px; max-width: 100%; max-height: 260px; border-radius: 8px; cursor: zoom-in; display: block; }
 .ncount { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); margin-left: 6px; }
 .ncount ha-icon { --mdc-icon-size: 14px; }
@@ -858,6 +864,7 @@ class HamletFarmPanel extends HTMLElement {
         <div class="kv"><span class="muted">Distance round</span><span>${fmtDist(lineLength([...sh.coords, sh.coords[0]]))}</span></div>`
         : `<div class="kv"><span class="muted">Length</span><span>${fmtDist(lineLength(sh.coords))}</span></div>`}
       ${sh.info ? `<div class="kv"><span class="muted">Details</span><span>${esc(sh.info)}</span></div>` : ""}
+      ${sh.notes ? `<p class="small" style="white-space:pre-wrap;margin:10px 0 0">${esc(sh.notes)}</p>` : ""}
       <div class="kv"><span class="muted">Corners</span><span>${sh.coords.length}</span></div>`);
     this._setHTML(this.$("pg-info"), "");
     this.$("pg-info").hidden = true;
@@ -878,11 +885,12 @@ class HamletFarmPanel extends HTMLElement {
         <button role="tab" data-ptab="history" aria-selected="false"><ha-icon icon="mdi:chart-line"></ha-icon>History</button></div>
         <div id="pg-hist" hidden></div>` : ""}
       <div class="pggrid" id="pg-grid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
-        <div class="col"><section class="card" id="pg-log"><h2>Site log<span class="sub" id="pg-count"></span></h2>
+        <div class="col"><section class="card" id="pg-log"><h2>Notes, photos &amp; files<span class="sub" id="pg-count"></span></h2>
           <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
-            <div id="npv"></div>
+            <div id="npv"></div><div id="nfv"></div>
             <div class="actions" style="margin-top:8px">
               <label class="btn"><input type="file" id="np" accept="image/*" hidden><ha-icon icon="mdi:camera"></ha-icon>Photo</label>
+              <label class="btn" title="Attach a PDF or picture (15 MB max)"><input type="file" id="nf" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" hidden><ha-icon icon="mdi:paperclip"></ha-icon>File</label>
               <button class="btn primary" data-act="noteadd" id="nadd"><ha-icon icon="mdi:send"></ha-icon>Add note</button></div>
             <div class="err" id="nerr"></div></div>
           <div id="pg-notes"><div class="note"><span class="muted small">Loading…</span></div></div></section></div></div></div>`;
@@ -1106,12 +1114,14 @@ class HamletFarmPanel extends HTMLElement {
     } catch (e) { this.$("derr").textContent = e.message || String(e); btn.disabled = false; btn.textContent = f.id ? "Save" : "Upload"; }
   }
 
+  _viewFile(url, title) { return this._viewDoc({ title, url }); }
+
   async _viewDoc(d) {
     const v = this.$("viewer");
     v.innerHTML = `<div class="vbar"><b>${esc(d.title)}</b><button class="btn" data-act="viewclose"><ha-icon icon="mdi:close"></ha-icon>Close</button></div><div class="vimg"><span style="color:#fff">Opening…</span></div>`;
     v.hidden = false;
     try {
-      const resp = await this._hass.fetchWithAuth(`/api/${DOMAIN}/doc/${this._entryId}/${d.id}`);
+      const resp = await this._hass.fetchWithAuth(d.url || `/api/${DOMAIN}/doc/${this._entryId}/${d.id}`);
       if (!resp.ok) throw new Error(resp.status === 404 ? "Not found, or not shared with you" : `Error ${resp.status}`);
       const blob = await resp.blob();
       if (this._viewUrl) URL.revokeObjectURL(this._viewUrl);
@@ -1147,9 +1157,10 @@ class HamletFarmPanel extends HTMLElement {
       return `<div class="note"><span class="av">${esc((n.user || "?").trim().charAt(0).toUpperCase())}</span>
         <div class="nb"><div class="who"><b>${esc(n.user || "Someone")}</b><span>${dstr(n.t)}</span></div>
           ${n.text ? `<p>${esc(n.text)}</p>` : ""}
-          ${n.photo ? `<img src="${photo(n.photo)}" alt="Photo" loading="lazy" data-photo="${photo(n.photo)}">` : ""}</div>
+          ${n.photo ? `<img src="${photo(n.photo)}" alt="Photo" loading="lazy" data-photo="${photo(n.photo)}">` : ""}
+          ${n.file ? `<button class="chipfile" data-nfile="${esc(n.file)}" data-fname="${esc(n.file_name || "file")}"><ha-icon icon="${n.file_mime === "application/pdf" ? "mdi:file-pdf-box" : "mdi:file-image-outline"}"></ha-icon>${esc(n.file_name || "file")} <small>${fmtMB(n.file_size || 0)}</small></button>` : ""}</div>
         ${mine ? `<button class="iconbtn" data-notedel="${esc(n.id)}" title="${conf ? "Tap again to delete" : "Delete"}" style="${conf ? "color:var(--c-bad)" : ""}"><ha-icon icon="${conf ? "mdi:delete-alert" : "mdi:delete-outline"}"></ha-icon></button>` : ""}</div>`;
-    }).join("") : `<div class="empty">No notes yet. Add what was done here, with a photo if you like – everyone sees it next time.</div>`);
+    }).join("") : `<div class="empty">Nothing here yet. Write a note, take a photo or attach a PDF (manual, drawing, test sheet…) – everyone sees it next time.</div>`);
   }
 
   async _notePhotoPicked(file) {
@@ -1168,7 +1179,7 @@ class HamletFarmPanel extends HTMLElement {
   async _noteAdd() {
     const pg = this._page; if (!pg) return;
     const text = this.$("nt").value.trim();
-    if (!text && !this._notePhoto) { this.$("nerr").textContent = "Write a note or add a photo"; return; }
+    if (!text && !this._notePhoto && !this._noteFile) { this.$("nerr").textContent = "Write a note, or add a photo or file"; return; }
     const btn = this.$("nadd"); btn.disabled = true; this.$("nerr").textContent = "";
     try {
       let photo = null;
@@ -1178,14 +1189,22 @@ class HamletFarmPanel extends HTMLElement {
         if (!resp.ok) throw new Error(j.message || "Photo upload failed");
         photo = j.photo;
       }
-      const r = await this._hass.callWS({ type: `${DOMAIN}/note_add`, entry_id: this._entryId, target: pg.id, text, ...(photo ? { photo } : {}) });
+      let file = null;
+      if (this._noteFile) {
+        btn.textContent = "Uploading…";
+        const resp = await this._hass.fetchWithAuth(`/api/${DOMAIN}/file/${this._entryId}/new`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: this._noteFile });
+        const j = await resp.json();
+        if (!resp.ok) throw new Error(j.message || "Upload failed");
+        file = { id: j.file, mime: j.mime, size: j.size, name: this._noteFile.name };
+      }
+      const r = await this._hass.callWS({ type: `${DOMAIN}/note_add`, entry_id: this._entryId, target: pg.id, text, ...(photo ? { photo } : {}), ...(file ? { file } : {}) });
       if (this._page !== pg) return;
-      pg.notes = r.notes; this.$("nt").value = ""; this.$("npv").innerHTML = "";
+      pg.notes = r.notes; this.$("nt").value = ""; this.$("npv").innerHTML = ""; this.$("nfv").innerHTML = ""; this._noteFile = null;
       if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url);
       this._notePhoto = null;
       this._renderNotes();
     } catch (e) { this.$("nerr").textContent = e.message || String(e); }
-    btn.disabled = false;
+    btn.disabled = false; btn.innerHTML = `<ha-icon icon="mdi:send"></ha-icon>Add note`;
   }
 
   /* ------------------------------------------------------------ editor */
@@ -1254,6 +1273,7 @@ class HamletFarmPanel extends HTMLElement {
         </div>
         ${lists}
         <div class="actions">
+          ${isNew ? "" : `<button class="btn" data-act="openlog" style="width:100%;justify-content:center;margin-bottom:4px"><ha-icon icon="mdi:paperclip"></ha-icon>Notes, photos &amp; files (site log)</button>`}
           <button class="btn primary" data-act="savepoint">Save</button>
           <button class="btn" data-act="canceledit">Cancel</button>
           ${isNew ? "" : `<button class="btn danger" data-act="deletepoint" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
@@ -1271,12 +1291,14 @@ class HamletFarmPanel extends HTMLElement {
         ${d.shape_kind === "sketch" ? `<div class="chips" style="margin-top:8px">${SKETCH_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || SKETCH_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>` : ""}
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
+          <div class="field"><label for="f_snotes">Notes</label><textarea id="f_snotes" maxlength="1000" placeholder="e.g. 110 mm HDPE, 1 m deep. Joint at the gate.">${esc(d.notes || "")}</textarea></div>
           ${d.shape_kind !== "sketch" ? `<div class="field"><label for="f_sinfo">Details</label><span class="hint">Size, cores, type – shown when the line is tapped</span><input type="text" id="f_sinfo" value="${esc(d.info || "")}" maxlength="120" placeholder="${esc(SHAPES[d.shape_kind].info || "")}"></div>` : ""}
           <div class="field inline"><label for="f_shid">Planning / demo only<span class="hint" style="display:block">Hidden from the map – admins can show it under Layers, clients never see it</span></label><label class="switch"><input type="checkbox" id="f_shid" ${d.hidden ? "checked" : ""}><span></span></label></div>
           ${d.shape_kind !== "field" ? `<div class="field inline"><label for="f_slen">Show the length on the map</label><label class="switch"><input type="checkbox" id="f_slen" ${d.show_len ? "checked" : ""}><span></span></label></div>` : ""}
           <div class="field inline"><span class="small muted">${d.coords.length} points${d.shape_kind === "field" ? ` · ≈ ${fmtN(this._area(d.coords) / 10000, 1)} ha` : ` · ≈ ${fmtN(this._length(d.coords), 0)} m`}</span></div>
         </div>
         <div class="actions">
+          ${isNew ? "" : `<button class="btn" data-act="openlog" style="width:100%;justify-content:center;margin-bottom:4px"><ha-icon icon="mdi:paperclip"></ha-icon>Notes, photos &amp; files (site log)</button>`}
           <button class="btn primary" data-act="saveshape">Save</button>
           <button class="btn" data-act="canceledit">Cancel</button>
           ${isNew ? "" : `<button class="btn danger" data-act="deleteshape" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
@@ -1351,7 +1373,7 @@ class HamletFarmPanel extends HTMLElement {
     if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
-    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info, show_len: s.show_len, hidden: s.hidden };
+    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info, show_len: s.show_len, hidden: s.hidden, notes: s.notes };
     this._renderSide();
   }
 
@@ -1535,7 +1557,7 @@ class HamletFarmPanel extends HTMLElement {
 
   _readForm() {
     const d = this._draft; const root = this.shadowRoot;
-    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); if (root.getElementById("f_slen")) d.show_len = root.getElementById("f_slen").checked; if (root.getElementById("f_shid")) d.hidden = root.getElementById("f_shid").checked; return; }
+    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); if (root.getElementById("f_slen")) d.show_len = root.getElementById("f_slen").checked; if (root.getElementById("f_shid")) d.hidden = root.getElementById("f_shid").checked; if (root.getElementById("f_snotes")) d.notes = root.getElementById("f_snotes").value; return; }
     d.specs = d.specs || {};
     root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = ["kva", "nmd"].includes(el.dataset.spec) ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
@@ -1554,6 +1576,13 @@ class HamletFarmPanel extends HTMLElement {
     const el = ev.composedPath()[0];
     if (el?.id === "offfile" && ev.type === "change" && el.files?.[0]) { this._offOpen(el.files[0]); return; }
     if (el?.id === "np" && ev.type === "change" && el.files?.[0]) { this._notePhotoPicked(el.files[0]); el.value = ""; return; }
+    if (el?.id === "nf" && ev.type === "change" && el.files?.[0]) {
+      const f = el.files[0]; el.value = "";
+      if (f.size > 15e6) { this.$("nerr").textContent = "That file is too big – 15 MB max"; return; }
+      this._noteFile = f;
+      this.$("nfv").innerHTML = `<span class="chipfile"><ha-icon icon="${f.type === "application/pdf" ? "mdi:file-pdf-box" : "mdi:file-image-outline"}"></ha-icon>${esc(f.name)} <small>${fmtMB(f.size)}</small><button data-act="notefilex" aria-label="Remove file">×</button></span>`;
+      return;
+    }
     if (el?.dataset?.layer && ev.type === "change") {
       this._layers[el.dataset.layer] = el.checked; this._saveLayers(); this._renderLayers(); return;
     }
@@ -1571,7 +1600,7 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
-      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange"];
+      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange", "nfile"];
     const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
@@ -1592,6 +1621,7 @@ class HamletFarmPanel extends HTMLElement {
       return;
     }
     if (ds.hrange && this._page) { this._histState.range = ds.hrange; this._renderHist(); return; }
+    if (ds.nfile) { this._viewFile(`/api/${DOMAIN}/file/${this._entryId}/${encodeURIComponent(ds.nfile)}`, ds.fname); return; }
     if (ds.doc) { this._openDoc(ds.doc); return; }
     if (ds.copy) { try { await navigator.clipboard.writeText(ds.copy); this._toast("Copied"); } catch (e) { this._toast(ds.copy); } return; }
     if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }
@@ -1726,6 +1756,16 @@ class HamletFarmPanel extends HTMLElement {
         break;
       }
       case "noteadd": this._noteAdd(); break;
+      case "notefilex": this._noteFile = null; this.$("nfv").innerHTML = ""; break;
+      case "openlog": {
+        const d = this._draft; if (!d) break;
+        const kind = d.kind === "shape" ? "shape" : "point"; const id = d.id;
+        if (kind === "point" ? !this._point(id) : !this._snap.shapes.some((x) => x.id === id)) { this._toast("Save it first"); break; }
+        this._draft = null; this._fm.drawPreview(null, []); this._renderSide();
+        this._openPage(kind, id);
+        setTimeout(() => this.$("pg-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+        break;
+      }
       case "notephotox": if (this._notePhoto?.url) URL.revokeObjectURL(this._notePhoto.url); this._notePhoto = null; this.$("npv").innerHTML = ""; break;
       case "editshape": {
         const id = this._page.id; this._closePage();
@@ -1798,7 +1838,7 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "saveshape": {
         this._readForm(); const d = this._draft;
-        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info, show_len: d.show_len, hidden: d.hidden } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info, show_len: d.show_len, hidden: d.hidden, notes: d.notes } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
         catch (e) { this.$("ferr").textContent = e.message; }
         break;
       }

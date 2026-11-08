@@ -330,7 +330,11 @@ class FarmController:
         self.hass.async_create_task(run())
 
     def _photo_ids(self) -> set[str]:
-        return {n["photo"] for lst in self.notes.values() for n in lst if n.get("photo")}
+        return {n["photo"] for lst in self.notes.values() for n in lst if n.get("photo")} | \
+               {n["file"] for lst in self.notes.values() for n in lst if n.get("file")}
+
+    def file_meta(self, file_id: str) -> dict | None:
+        return next((n for lst in self.notes.values() for n in lst if n.get("file") == file_id), None)
 
     def photo_known(self, photo_id: str) -> bool:
         return photo_id in self._photo_ids()
@@ -341,16 +345,23 @@ class FarmController:
     def notes_for(self, target: str) -> list[dict]:
         return list(reversed(self.notes.get(target, [])))
 
-    def note_add(self, target: str, text: str, user, photo: str | None = None) -> dict:
+    def note_add(self, target: str, text: str, user, photo: str | None = None, file: dict | None = None) -> dict:
         if not self._target_exists(target):
             raise ValueError("That point is not on the map any more")
         text = str(text or "").strip()[:2000]
         if photo is not None and not notes_mod.PHOTO_ID.match(str(photo)):
             raise ValueError("bad photo")
-        if not text and not photo:
-            raise ValueError("Write a note or add a photo")
+        att = None
+        if file:
+            fid = str(file.get("id") or "")
+            mime = str(file.get("mime") or "")
+            if not notes_mod.PHOTO_ID.match(fid) or mime not in ("application/pdf", "image/jpeg", "image/png"):
+                raise ValueError("bad file")
+            att = {"file": fid, "file_name": str(file.get("name") or "file")[:120], "file_mime": mime, "file_size": int(file.get("size") or 0)}
+        if not text and not photo and not att:
+            raise ValueError("Write a note or add a photo or file")
         note = {"id": logic.new_id(), "t": dt_util.now().isoformat(), "text": text, "photo": photo,
-                "user_id": user.id if user else None, "user": (user.name if user else None) or "Someone"}
+                "user_id": user.id if user else None, "user": (user.name if user else None) or "Someone", **(att or {})}
         lst = self.notes.setdefault(target, [])
         lst.append(note)
         dropped = lst[:-300]
@@ -372,6 +383,8 @@ class FarmController:
         lst.remove(note)
         if note.get("photo"):
             self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id, [note["photo"]])
+        if note.get("file"):
+            self._bg(notes_mod.delete_files, self.hass, self.entry.entry_id, [note["file"]])
         self._save()
         self._recompute()
 
@@ -477,10 +490,11 @@ class FarmController:
             if target in hidden or target not in kinds:
                 continue
             for n in lst:
-                hay = f"{n.get('text', '')} {n.get('user', '')}".lower()
+                hay = f"{n.get('text', '')} {n.get('user', '')} {n.get('file_name', '')}".lower()
                 if all(w in hay for w in words):
                     hits.append({"target": target, "kind": kinds[target][0], "name": kinds[target][1], "id": n["id"],
-                                 "text": (n.get("text") or "")[:300], "user": n.get("user"), "t": n.get("t"), "photo": bool(n.get("photo"))})
+                                 "text": (n.get("text") or n.get("file_name") or "")[:300], "user": n.get("user"), "t": n.get("t"),
+                                 "photo": bool(n.get("photo")), "file": bool(n.get("file"))})
         hits.sort(key=lambda h: h.get("t") or "", reverse=True)
         return hits[:limit]
 
@@ -492,6 +506,9 @@ class FarmController:
         photos = [n["photo"] for n in gone if n.get("photo")]
         if photos:
             self._bg(notes_mod.delete_photos, self.hass, self.entry.entry_id, photos)
+        files = [n["file"] for n in gone if n.get("file")]
+        if files:
+            self._bg(notes_mod.delete_files, self.hass, self.entry.entry_id, files)
 
     def save_view(self, raw: dict) -> None:
         self.view = logic.clean_view(raw)

@@ -151,3 +151,7 @@ def test_manual_md_up_to_date():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert (root / "MANUAL.md").read_text(encoding="utf-8") == mod.convert(mod.SRC.read_text(encoding="utf-8"))
+
+
+def test_shape_notes():
+    assert logic.clean_shape({"kind": "pipe", "notes": "110 mm HDPE, 1 m deep", "coords": [[1, 2], [3, 4]]})["notes"] == "110 mm HDPE, 1 m deep"

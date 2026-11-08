@@ -248,6 +248,24 @@ async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client
     await ws.send_json({"id": 31, "type": f"{DOMAIN}/search", "entry_id": entry.entry_id, "q": "nothing like this"})
     assert (await _reply(ws, 31))["result"]["notes"] == []
 
+    # PDF attachment on a note
+    resp = await client.post(f"/api/hamlet_farm/file/{entry.entry_id}/new", data=b"%PDF-1.4 manual")
+    assert resp.status == 200
+    up = await resp.json()
+    assert up["mime"] == "application/pdf"
+    await ws.send_json({"id": 32, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": pid, "text": "",
+                        "file": {"id": up["file"], "name": "Pump manual.pdf", "mime": up["mime"], "size": up["size"]}})
+    r = await _reply(ws, 32)
+    assert r["success"] and r["result"]["note"]["file_name"] == "Pump manual.pdf"
+    resp = await client.get(f"/api/hamlet_farm/file/{entry.entry_id}/{up['file']}")
+    assert resp.status == 200 and resp.content_type == "application/pdf"
+    resp = await anon.get(f"/api/hamlet_farm/file/{entry.entry_id}/{up['file']}")
+    assert resp.status == 401
+    resp = await client.post(f"/api/hamlet_farm/file/{entry.entry_id}/new", data=b"MZ exe")
+    assert resp.status == 400
+    fpath = hass.config.path("hamlet_farm", entry.entry_id, "files", up["file"])
+    assert os.path.exists(fpath)
+
     # a read-only (non-admin) user can add notes but not delete someone else's
     ro = await hass_ws_client(hass, hass_read_only_access_token)
     await ro.send_json({"id": 1, "type": f"{DOMAIN}/note_add", "entry_id": entry.entry_id, "target": pid, "text": "Checked, all OK"})
@@ -266,7 +284,7 @@ async def test_notes_and_photos(hass: HomeAssistant, hass_ws_client, hass_client
     await ws.send_json({"id": 40, "type": f"{DOMAIN}/delete_point", "entry_id": entry.entry_id, "point_id": pid})
     assert (await _reply(ws, 40))["success"]
     await hass.async_block_till_done()
-    assert not os.path.exists(path)
+    assert not os.path.exists(path) and not os.path.exists(fpath)
     assert hass.data[DOMAIN][entry.entry_id].notes == {}
 
 

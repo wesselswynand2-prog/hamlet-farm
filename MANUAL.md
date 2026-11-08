@@ -48,13 +48,13 @@ Tap a pump, pivot, Eskom point or any line to open its page. **Map** (top left) 
 - **Directions:** opens Google Maps navigation to the point (needs mobile data).
 - **Report to Eskom** (Eskom points): calls 08600 37566 – the account, meter and pole number are on the same page.
 
-## Site log – notes and photos
+## Notes, photos and files
 
-Every point and line has a **site log** on its page. Anyone logged in can add to it.
+Every point and line has a **site log** (*Notes, photos & files*) on its page. Anyone logged in can add to it. In Edit, **Notes, photos & files** in a point's or line's settings goes straight there.
 
 1. Open the point's page.
 2. Type what you found or did, parts used, settings.
-3. **Photo** to add a picture from the phone camera (it is made smaller before uploading, so it works on slow Wi-Fi).
+3. **Photo** to add a picture from the phone camera (it is made smaller before uploading, so it works on slow Wi-Fi), or **File** to attach a **PDF**, JPG or PNG up to 15 MB – a manual, drawing, test sheet or COC. Tap a file in the log to open it.
 4. **Add note.**
 
 Notes show who wrote them and when, newest first. Tap a photo to see it big. You (or an admin) can delete your own note – tap the bin twice. Points with notes show 📝 and a count in the list.
@@ -124,7 +124,7 @@ height: 400
 3. Tap along the route. **Undo** removes the last point.
 4. **Finish** → give it a name and **Details** (e.g. *95 mm² 4-core Cu SWA*). **Save.**
 
-Tap a line in Edit to rename it, change its type, switch **Show the length on the map** on, or **Delete** it (tap twice).
+Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, depth, joints…), switch **Show the length on the map** on, or **Delete** it (tap twice).
 
 ## Drawing, planning lines and deleting (admin)
 
