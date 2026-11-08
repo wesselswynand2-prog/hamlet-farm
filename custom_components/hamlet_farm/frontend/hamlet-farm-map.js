@@ -31,7 +31,8 @@ export const ROLES = {
 };
 export const SHAPES = {
   pipe: { label: "Water pipe", color: "#5aaeff", weight: 3, dash: null },
-  power: { label: "Power line", color: "#ffcc33", weight: 2.5, dash: "8 6" },
+  power: { label: "Overhead power line", color: "#ffcc33", weight: 2.5, dash: "8 6" },
+  cable: { label: "Electrical cable", color: "#ff6a00", weight: 3, dash: "14 5 3 5" },
   fence: { label: "Fence", color: "#f2f2f2", weight: 1.5, dash: "2 5" },
   road: { label: "Road", color: "#e0cfa6", weight: 4, dash: null },
   field: { label: "Land / camp", color: "#8fd16a", weight: 2, dash: null },

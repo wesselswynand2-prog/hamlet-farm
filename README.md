@@ -9,7 +9,7 @@ A satellite map of the client's farm in Home Assistant – like Google Maps, but
 | **Eskom point** | Power on / **No power** (voltage or a "supply present" input), kW now, kWh today. |
 | **Tank / dam** | Level %, **Low** alert below a set level. |
 | **Valve, gate, generator, solar, building, camera, weather station** | Open / closed, on / off, camera picture, any extra sensors. |
-| **Lines and land** | Water pipes, power lines, fences, roads and camps / lands (with length or hectares). |
+| **Lines and land** | Water pipes, electrical cables (underground), overhead power lines, fences, roads and camps / lands (with length or hectares). |
 
 Installs as a **Farm map** page in the Home Assistant sidebar (tabs when there are several farms), a dashboard card and summary sensors. Same install and update as the other Hamlet apps.
 
@@ -35,7 +35,7 @@ Then: **Settings → Devices & services → Add integration → Hamlet Farm** an
 2. Find the farm: type a place name or GPS (`-25.86, 28.10`) in the search box, or zoom in on the satellite picture.
 3. **Point** → tap where the pump / pivot / Eskom point is (or **Where I stand** to use the phone's GPS on site – needs https, e.g. Nabu Casa).
 4. Pick the type, name it and map the entities (start typing – it suggests matching entities and shows their value now).
-5. **Line / land** → tap along a pipe, power line or fence (or round a camp) → **Finish** → pick the kind and name.
+5. **Line / land** → tap along a pipe, electrical cable, power line or fence (or round a camp) → **Finish** → pick the kind and name.
 6. Drag points to move them. **Start view** saves where the map opens.
 
 Clients (non-admin users) see the map, the status and the On / Off buttons. Editing and alert settings are admin-only.

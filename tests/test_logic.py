@@ -37,6 +37,7 @@ def test_sketch_shape():
 
 
 def test_clean_shape():
+    assert logic.clean_shape({"kind": "cable", "coords": [[1, 2], [3, 4]]})["name"] == "Electrical cable"
     s = logic.clean_shape({"kind": "pipe", "coords": [[1, 2], [3, 4]]})
     assert s["name"] == "Water pipe"
     with pytest.raises(ValueError):
