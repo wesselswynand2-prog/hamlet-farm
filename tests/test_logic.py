@@ -134,3 +134,9 @@ def test_eskom_specs():
     assert st["status"] == "Power on · 50% load" and st["values"]["energy_month_kwh"] == 812.4
     st = logic.point_status(p, reader({"sensor.v": Reading("231", "V"), "sensor.p": Reading("75", "kW")}))
     assert st["status"] == "Above NMD · 107%" and st["cls"] == "warn"
+
+
+def test_point_cards_yaml_kept():
+    y = "type: custom:panel-meter-card\nenergy: sensor.kwh\n"
+    assert pt(cards=y)["cards"] == y
+    assert len(pt(cards="x" * 20000)["cards"]) == 10000

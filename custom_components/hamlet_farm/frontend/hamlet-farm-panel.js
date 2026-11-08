@@ -164,6 +164,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .pghead .dot { width: 48px; height: 48px; } .pghead .dot ha-icon { --mdc-icon-size: 28px; }
 .pghead .t { flex: 1; min-width: 160px; } .pghead .t b { display: block; font-size: 22px; font-weight: 500; } .pghead .t span { color: var(--muted); font-size: 14px; }
 .pggrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.pgcards { display: flex; flex-direction: column; gap: var(--gap); }
+.pgcards:empty { display: none; }
 .pggrid .col { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 @media (max-width: 899px) { .pggrid { grid-template-columns: 1fr; } }
 .erow { cursor: pointer; } .erow:hover span:first-child { color: var(--accent); }
@@ -249,6 +251,7 @@ class HamletFarmPanel extends HTMLElement {
     if (first) this._init();
     else if (this._snap && this._page) this._renderPage();   // live entity values on the point page
     if (this._pumpCard) this._pumpCard.hass = hass;
+    if (this._pageCards) for (const c of this._pageCards) c.hass = hass;
   }
   get hass() { return this._hass; }
   set narrow(v) { this._narrow = v; if (this._menuBtn) this._menuBtn.narrow = v; }
@@ -771,7 +774,7 @@ class HamletFarmPanel extends HTMLElement {
     this._sel = kind === "point" ? id : null; this._fm.setSelected(this._sel); this._confirm = null;
     const el = this.$("page");
     el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
-      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
+      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
         <div class="col"><section class="card" id="pg-log"><h2>Site log<span class="sub" id="pg-count"></span></h2>
           <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
             <div id="npv"></div>
@@ -784,6 +787,8 @@ class HamletFarmPanel extends HTMLElement {
     this._pumpCard = null;
     const t = this._pageTarget();
     if (kind === "point" && t?.pump_entry) this._mountPumpCard(t.pump_entry);
+    this._pageCards = [];
+    if (kind === "point" && t?.cards?.trim()) this._mountCards(t.cards);
     this._renderPage();
     this._loadNotes();
   }
@@ -791,11 +796,46 @@ class HamletFarmPanel extends HTMLElement {
   _rerender() { if (this._page) this._renderPage(); else this._renderSide(); }
 
   _closePage() {
-    const pg = this._page; this._page = null; this._pumpCard = null; this._notePhoto = null;
+    const pg = this._page; this._page = null; this._pumpCard = null; this._pageCards = null; this._notePhoto = null;
     const el = this.$("page"); el.hidden = true; el.innerHTML = "";
     if (pg?.kind === "point" && this._point(pg.id)) { this._fm.flyTo(this._point(pg.id)); this._fm.setSelected(pg.id); }
     this._sel = null;
     this._fm.map.invalidateSize();
+  }
+
+  /** Dashboard cards (any Lovelace card YAML, e.g. the panel meter card) on the point page. */
+  async _mountCards(yamlText) {
+    const box = this.$("pg-cards"); if (!box) return;
+    const page = this._page;
+    let configs;
+    try {
+      const { loadAll } = await import("./lib/js-yaml.esm.js");
+      configs = loadAll(yamlText).flatMap((d) => (Array.isArray(d) ? d : d && typeof d === "object" && d.cards && !d.type ? d.cards : [d])).filter((c) => c && typeof c === "object");
+    } catch (e) { box.innerHTML = `<section class="card"><div class="err">Card YAML: ${esc(e.message)}</div></section>`; return; }
+    if (!configs.length) return;
+    try {
+      // custom cards are normally loaded by dashboards; load their resources here too
+      const missing = configs.map((c) => String(c.type || "")).filter((t) => t.startsWith("custom:") && !customElements.get(t.slice(7)));
+      if (missing.length) await this._loadResources(missing.map((t) => t.slice(7)));
+      const helpers = await window.loadCardHelpers();
+      if (this._page !== page) return;
+      box.replaceChildren();
+      for (const conf of configs) {
+        const el = helpers.createCardElement(conf);
+        el.hass = this._hass;
+        box.appendChild(el);
+        this._pageCards.push(el);
+      }
+    } catch (e) { box.innerHTML = `<section class="card"><div class="err">Could not show the card: ${esc(e.message)}</div></section>`; }
+  }
+
+  async _loadResources(tags) {
+    let res = [];
+    try { res = await this._hass.callWS({ type: "lovelace/resources" }); } catch (e) { return; }
+    const mods = res.filter((r) => r.type === "module" || r.res_type === "module");
+    const hit = mods.filter((r) => tags.some((t) => r.url.includes(t)));
+    for (const r of hit.length ? hit : mods) { try { await import(new URL(r.url, location.origin).href); } catch (e) { /* skip */ } }
+    await Promise.race([Promise.all(tags.map((t) => customElements.whenDefined(t))), new Promise((r) => setTimeout(r, 4000))]);
   }
 
   async _mountPumpCard(pumpEntry) {
@@ -1094,6 +1134,9 @@ class HamletFarmPanel extends HTMLElement {
           ${["tank", "pump", "other"].includes(d.type) || d.entities.level ? `<div class="field inline"><label for="f_low">Low level alert below</label><span class="small muted"><input type="number" id="f_low" data-f="low_level" min="0" max="100" value="${esc(d.low_level)}"> %</span></div>` : ""}
           <div class="field inline"><label for="f_alert">Alert when this point has a problem<span class="hint" style="display:block">Fault, no power, offline, low level</span></label>
             <label class="switch"><input type="checkbox" id="f_alert" data-f="alert" ${d.alert ? "checked" : ""}><span></span></label></div>
+          <div class="field"><label for="f_cards">Cards on the point's page</label><span class="hint">Any dashboard card as YAML – e.g. the panel meter card. Several cards: put <code>---</code> between them.</span>
+            <textarea id="f_cards" data-f="cards" rows="${d.cards ? 8 : 2}" spellcheck="false" style="font-family:monospace;font-size:12px" placeholder="type: custom:panel-meter-card">${esc(d.cards || "")}</textarea>
+            <div class="actions" style="margin-top:4px"><button class="btn" data-act="cardmeter" style="padding:4px 12px"><ha-icon icon="mdi:gauge"></ha-icon>Add panel meter</button></div></div>
           <div class="field"><label for="f_notes">Notes</label><textarea id="f_notes" data-f="notes" maxlength="500" placeholder="e.g. 7.5 kW submersible, 80 m deep. Key at the farm office.">${esc(d.notes)}</textarea></div>
           <div class="field inline"><span class="small muted">GPS ${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}</span><span class="small muted">drag on the map to move</span></div>
         </div>
@@ -1238,6 +1281,7 @@ class HamletFarmPanel extends HTMLElement {
       else if (f === "extra") d.extra = el.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
       else if (f === "radius" || f === "low_level") d[f] = Number(el.value) || 0;
       else if (f === "pump_entry") d.pump_entry = el.value || null;
+      else if (f === "cards") d.cards = el.value;
       else d[f] = el.value;
     });
   }
@@ -1344,6 +1388,23 @@ class HamletFarmPanel extends HTMLElement {
       case "pendone": this._stopPen(); this._renderBanner(); break;
       case "penlen": this._pen.len = !this._pen.len; this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "cardmeter": {
+        this._readForm(); const d = this._draft; const e = d.entities || {};
+        const tpl = [
+          "type: custom:panel-meter-card", "model: DMED 330", e.energy ? `energy: ${e.energy}` : "energy: sensor.meter_energy_import", "pages:",
+          "  - unit: V", "    max: 460", "    cells:",
+          "      - { entity: sensor.meter_voltage_l1, top: L1 }", "      - { entity: sensor.meter_voltage_l2, top: L2 }",
+          "      - { entity: sensor.meter_voltage_l3, top: L3 }",
+          `      - { entity: ${e.power || "sensor.meter_power_total"}, bottom: kW, multiply: 0.001 }`,
+          "  - unit: A", "    max: 100", "    cells:",
+          "      - { entity: sensor.meter_current_l1, top: L1 }", "      - { entity: sensor.meter_current_l2, top: L2 }",
+          "      - { entity: sensor.meter_current_l3, top: L3 }", "      - { entity: sensor.meter_current_n, top: N }",
+        ].join("\n");
+        d.cards = d.cards?.trim() ? `${d.cards.trim()}\n---\n${tpl}` : tpl;
+        this._renderSide();
+        this._toast("Panel meter added – change the sensor names to the meter's own");
+        break;
+      }
       case "docnew": this._newDoc(ds.docpoint); break;
       case "docclose": this._closeDoc(); break;
       case "docsave": this._saveDoc(); break;

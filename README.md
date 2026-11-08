@@ -70,6 +70,25 @@ Tap a pump, pivot, Eskom point – or a line, drawing or piece of land – to op
 
 **Map** goes back to the map at that point.
 
+### Dashboard cards on a point's page (e.g. the panel meter)
+
+Any Home Assistant dashboard card can be shown on a point's page – the [Panel Meter Card](https://github.com/wesselswynand2-prog/panel-meter-card), the VFD card, a history graph… Edit the point → **Cards on the point's page** → paste the card's YAML, or tap **Add panel meter** for a ready template (it fills in the point's kWh meter) and change the sensor names to the meter's own. Several cards: put `---` between them.
+
+```yaml
+type: custom:panel-meter-card
+model: DMED 330
+energy: sensor.meter_energy_import
+pages:
+  - unit: V
+    max: 460
+    cells:
+      - { entity: sensor.meter_voltage_l1, top: L1 }
+      - { entity: sensor.meter_voltage_l2, top: L2 }
+      - { entity: sensor.meter_voltage_l3, top: L3 }
+```
+
+Custom cards must be installed on that Home Assistant (e.g. through HACS) – the page loads them by itself.
+
 ## Quotes and documents
 
 Share quotes, invoices, COCs and plans with the client – only with the people you pick.
