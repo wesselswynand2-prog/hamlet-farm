@@ -36,7 +36,7 @@ Then: **Settings → Devices & services → Add integration → Hamlet Farm** an
 2. Find the farm: type a place name or GPS (`-25.86, 28.10`) in the search box, or zoom in on the satellite picture.
 3. **Point** → tap where the pump / pivot / Eskom point is (or **Where I stand** to use the phone's GPS on site – needs https, e.g. Nabu Casa).
 4. Pick the type, name it and map the entities (start typing – it suggests matching entities and shows their value now).
-5. **Line / land** → tap along a pipe, cable (1 000 V, 3 300 V or MV), power line or fence (or round a camp) → **Finish** → pick the kind and name.
+5. **Line / land** → pick what you are drawing in the bar (water pipe, cable 1 000 V / 3 300 V / MV, overhead line, fence, road, land) → tap along it → **Finish** → name it.
 6. Drag points to move them. **Start view** saves where the map opens.
 
 Clients (non-admin users) see the map, the status and the On / Off buttons. Editing and alert settings are admin-only.

@@ -80,6 +80,8 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .banner { background: rgba(20,24,28,.88); color: #fff; border-radius: 12px; padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   box-shadow: 0 2px 10px rgba(0,0,0,.45); max-width: 640px; }
 .banner b { font-weight: 500; }
+.banner .kindsel { width: auto; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); padding: 5px 8px; font-size: 14px; }
+.banner .kindsel option { color: #000; }
 .banner .btn { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }
 .banner .btn.primary { background: var(--accent); border-color: var(--accent); }
 .toast { position: absolute; z-index: 600; left: 50%; top: 56px; transform: translateX(-50%); background: rgba(20,24,28,.9); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px; }
@@ -415,7 +417,9 @@ class HamletFarmPanel extends HTMLElement {
     } else if (this._draw) {
       const d = SHAPES[this._draw.kind];
       const n = this._draw.coords.length; const need = this._draw.kind === "field" ? 3 : 2;
-      html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing <b>${esc(d.label.toLowerCase())}</b> – tap the map to add points</span>${n > 1 ? `<span class="big">${this._draw.kind === "field" && n > 2 ? fmtArea(areaM2(this._draw.coords)) : fmtDist(lineLength(this._draw.coords))}</span>` : ""}
+      html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing</span>
+        <select id="drawkind" class="kindsel" aria-label="What are you drawing" style="border-left:6px solid ${d.color}">${Object.entries(SHAPES).filter(([k]) => k !== "sketch").map(([k, v]) => `<option value="${k}" ${k === this._draw.kind ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+        <span>– tap the map to add points</span>${n > 1 ? `<span class="big">${this._draw.kind === "field" && n > 2 ? fmtArea(areaM2(this._draw.coords)) : fmtDist(lineLength(this._draw.coords))}</span>` : ""}
         <button class="btn" data-act="drawundo" ${n ? "" : "disabled"}>Undo</button><button class="btn" data-act="drawcancel">Cancel</button>
         <button class="btn primary" data-act="drawdone" ${n >= need ? "" : "disabled"}>Finish</button></div>`;
     } else if (this._placing) {
@@ -1290,6 +1294,7 @@ class HamletFarmPanel extends HTMLElement {
     const el = ev.composedPath()[0];
     if (el?.id === "offfile" && ev.type === "change" && el.files?.[0]) { this._offOpen(el.files[0]); return; }
     if (el?.id === "np" && ev.type === "change" && el.files?.[0]) { this._notePhotoPicked(el.files[0]); el.value = ""; return; }
+    if (el?.id === "drawkind" && this._draw) { this._draw.kind = el.value; this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
     if ((el?.id === "offname" || el?.id === "offsrc") && this._off) { this._off[el.id === "offname" ? "name" : "credit"] = el.value; return; }
     if (!this._draft || !el?.id) return;
@@ -1470,10 +1475,11 @@ class HamletFarmPanel extends HTMLElement {
       case "gpsplace":
         try { const c = await this._gps(); this._fm.map.flyTo([c.latitude, c.longitude], 18); this._newPoint(c.latitude, c.longitude); } catch (e) { this._toast(e.message); }
         break;
-      case "addline": this._draft = null; this._draw = { kind: "pipe", coords: [] }; this._renderBanner(); this._renderSide(); break;
+      case "addline": this._draft = null; this._draw = { kind: this._lastKind || "pipe", coords: [] }; this._renderBanner(); this._renderSide(); break;
       case "drawundo": this._draw.coords.pop(); this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); break;
       case "drawcancel": this._draw = null; this._fm.drawPreview(null, []); this._renderBanner(); this._renderSide(); break;
       case "drawdone":
+        this._lastKind = this._draw.kind;
         this._draft = { kind: "shape", id: Math.random().toString(16).slice(2, 10), shape_kind: this._draw.kind, name: "", coords: this._draw.coords };
         this._draw = null; this._renderBanner(); this._renderSide(); break;
       case "saveview":
