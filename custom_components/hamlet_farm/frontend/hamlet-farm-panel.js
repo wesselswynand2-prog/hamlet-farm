@@ -1,5 +1,6 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
 import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
+import { HISTORY_CSS, renderHistory } from "./hamlet-farm-history.js";
 import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
@@ -287,7 +288,7 @@ class HamletFarmPanel extends HTMLElement {
 
   async _init() {
     const root = this.shadowRoot;
-    root.innerHTML = `<style>${STYLE}${HELP_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
+    root.innerHTML = `<style>${STYLE}${HELP_CSS}${HISTORY_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
       <div class="wrap">
         <div class="toolbar"><span id="menu"></span><div class="title">Farm map</div><div class="tabs" role="tablist"></div>
           <button class="tbtn" data-act="help" title="Manual and help"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Help</button>
@@ -862,7 +863,10 @@ class HamletFarmPanel extends HTMLElement {
     this._sel = kind === "point" ? id : null; this._fm.setSelected(this._sel); this._confirm = null;
     const el = this.$("page");
     el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
-      <div class="pggrid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
+      ${kind === "point" ? `<div class="htabs" role="tablist"><button role="tab" data-ptab="overview" aria-selected="true"><ha-icon icon="mdi:card-text-outline"></ha-icon>Overview</button>
+        <button role="tab" data-ptab="history" aria-selected="false"><ha-icon icon="mdi:chart-line"></ha-icon>History</button></div>
+        <div id="pg-hist" hidden></div>` : ""}
+      <div class="pggrid" id="pg-grid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
         <div class="col"><section class="card" id="pg-log"><h2>Site log<span class="sub" id="pg-count"></span></h2>
           <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
             <div id="npv"></div>
@@ -879,6 +883,12 @@ class HamletFarmPanel extends HTMLElement {
     if (kind === "point" && t?.cards?.trim()) this._mountCards(t.cards);
     this._renderPage();
     this._loadNotes();
+  }
+
+  _renderHist() {
+    const p = this._pageTarget(); if (!p || this._page?.kind !== "point") return;
+    this._histState = this._histState || { range: "24h" };
+    renderHistory(this.$("pg-hist"), this._hass, p, this._histState, "#2a78d6");
   }
 
   _rerender() { if (this._page) this._renderPage(); else this._renderSide(); }
@@ -1534,7 +1544,7 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
-      "pen", "scolor", "more", "notedel", "photo", "doc", "copy"];
+      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange"];
     const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
@@ -1547,6 +1557,14 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
+    if (ds.ptab && this._page) {
+      this._page.tab = ds.ptab;
+      this.shadowRoot.querySelectorAll("[data-ptab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.ptab === ds.ptab)));
+      this.$("pg-grid").hidden = ds.ptab !== "overview"; this.$("pg-hist").hidden = ds.ptab !== "history";
+      if (ds.ptab === "history") this._renderHist();
+      return;
+    }
+    if (ds.hrange && this._page) { this._histState.range = ds.hrange; this._renderHist(); return; }
     if (ds.doc) { this._openDoc(ds.doc); return; }
     if (ds.copy) { try { await navigator.clipboard.writeText(ds.copy); this._toast("Copied"); } catch (e) { this._toast(ds.copy); } return; }
     if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }

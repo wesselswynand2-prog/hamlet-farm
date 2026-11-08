@@ -43,6 +43,7 @@ Tap a pump, pivot, Eskom point or any line to open its page. **Map** (top left) 
 - **Controls:** **On / Off** (or **Open / Close** for gates and valves). Tap once – the button asks *Tap again* – tap again to send. A linked Hamlet Pump shows **Auto / Run 30m / On / Off** and its pump card.
 - **Dashboard cards:** some points show extra cards here, like the panel meter.
 - **About:** notes, sizes (transformers, Eskom account), the linked sensors – **tap a sensor to see its history graph** – and the GPS position.
+- **History** tab (next to *Overview*): graphs of the point's readings for the last **24 hours, 7 days or 30 days** – running / on time (with hours run and how many starts), power, kWh used per hour or per day, level, pressure, flow, pivot position, supply voltage and any extra sensors. Each graph shows min / average / max; touch or hover a graph to read the value at that time. A drop to 0 on supply voltage shows exactly when the power was off.
 - **Directions:** opens Google Maps navigation to the point (needs mobile data).
 - **Report to Eskom** (Eskom points): calls 08600 37566 – the account, meter and pole number are on the same page.
 
