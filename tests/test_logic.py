@@ -140,3 +140,14 @@ def test_point_cards_yaml_kept():
     y = "type: custom:panel-meter-card\nenergy: sensor.kwh\n"
     assert pt(cards=y)["cards"] == y
     assert len(pt(cards="x" * 20000)["cards"]) == 10000
+
+
+def test_manual_md_up_to_date():
+    """MANUAL.md on GitHub must match the in-app manual (run: python3 tools/make_manual.py)."""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("make_manual", root / "tools" / "make_manual.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert (root / "MANUAL.md").read_text(encoding="utf-8") == mod.convert(mod.SRC.read_text(encoding="utf-8"))

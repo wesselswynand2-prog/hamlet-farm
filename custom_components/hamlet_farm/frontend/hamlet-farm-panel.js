@@ -1,4 +1,5 @@
 /* Hamlet Farm – sidebar panel for Home Assistant: satellite map of the farm with live points. No build step. */
+import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
 import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
@@ -274,9 +275,10 @@ class HamletFarmPanel extends HTMLElement {
 
   async _init() {
     const root = this.shadowRoot;
-    root.innerHTML = `<style>${STYLE}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
+    root.innerHTML = `<style>${STYLE}${HELP_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
       <div class="wrap">
         <div class="toolbar"><span id="menu"></span><div class="title">Farm map</div><div class="tabs" role="tablist"></div>
+          <button class="tbtn" data-act="help" title="Manual and help"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Help</button>
           <button class="tbtn" id="editbtn" data-act="edit" hidden aria-pressed="false"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button></div>
         <div class="body">
           <div class="mapbox">
@@ -295,6 +297,7 @@ class HamletFarmPanel extends HTMLElement {
           </div>
           <div class="side" id="side"><div class="card loading">Loading…</div></div>
           <div class="page" id="page" hidden></div>
+          <div class="help" id="help" hidden></div>
         </div>
         <div class="lightbox" id="lightbox" hidden><img alt=""></div>
         <div class="modal" id="docmodal" hidden><section class="card" id="docbody"></section></div>
@@ -457,6 +460,7 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="mclose" ${c.length > 2 ? "" : "disabled"} aria-pressed="${m.closed}">${m.closed ? "Line" : "Area"}</button>
         <button class="btn" data-act="mclear" ${c.length ? "" : "disabled"}>Clear</button>
         ${this._isAdmin && c.length > 1 ? `<button class="btn" data-act="msave">Save as line</button>` : ""}
+        <button class="btn" data-act="helpat" data-topic="Measuring" aria-label="Help">?</button>
         <button class="btn primary" data-act="measure">Done</button></div>`;
     } else if (this._pen) {
       html = `<div class="banner"><ha-icon icon="mdi:draw"></ha-icon><span>Drag on the map to draw</span>
@@ -465,6 +469,7 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="penlen" aria-pressed="${this._pen.len}" title="Write the length next to each line" style="${this._pen.len ? "background:#ffeb3b;color:#000;border-color:#ffeb3b" : ""}"><ha-icon icon="mdi:ruler"></ha-icon>Length</button>
         ${this._pen.last ? `<span class="big">${fmtDist(this._pen.last)}</span>` : ""}
         <button class="btn" data-act="penundo" ${this._pen.strokes.length ? "" : "disabled"}>Undo</button>
+        <button class="btn" data-act="helpat" data-topic="Drawing" aria-label="Help">?</button>
         <button class="btn primary" data-act="pendone">Done</button></div>`;
     } else if (this._draw) {
       const d = SHAPES[this._draw.kind];
@@ -483,6 +488,7 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="addline"><ha-icon icon="mdi:vector-polyline"></ha-icon>Line / land</button>
         <button class="btn" data-act="pen"><ha-icon icon="mdi:draw"></ha-icon>Draw</button>
         <button class="btn" data-act="saveview" title="Open the map here next time"><ha-icon icon="mdi:crop-free"></ha-icon>Start view</button>
+        <button class="btn" data-act="helpat" data-topic="Setting up" aria-label="Help">?</button>
         <button class="btn" data-act="edit">Done</button></div>`;
     }
     this._setHTML(this.$("banner"), html);
@@ -523,7 +529,7 @@ class HamletFarmPanel extends HTMLElement {
       <section class="card">
         <h2>Points</h2>
         ${pts.length ? `<div class="chips" style="margin-bottom:8px">${chip("all", "All")}${sm.alerts ? chip("alerts", `Alerts (${sm.alerts})`, "mdi:alert-outline") : ""}${types.map((t) => chip(t, TYPES[t]?.label || t, ICON(t))).join("")}</div>` : ""}
-        <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._isAdmin ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is." : "No points on the map yet."}</div>`}</div>
+        <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._isAdmin ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is. <a href=\"#\" data-act=\"helpat\" data-topic=\"Setting up\">How to set up a farm</a>" : "No points on the map yet."}</div>`}</div>
       </section>
       ${this._docsCardHtml()}
       ${evs.length ? `<section class="card"><h2>Alerts<span class="sub">last ${evs.length}</span></h2>
@@ -604,7 +610,7 @@ class HamletFarmPanel extends HTMLElement {
         </div>
         <div class="err" id="oerr">${esc(o.error || "")}</div>`;
     }
-    this._setHTML(this.$("side"), `<section class="card" id="offline"><h2>Offline farm photo<span class="sub">${esc(o.fileName)}</span></h2>${body}</section>`);
+    this._setHTML(this.$("side"), `<section class="card" id="offline"><h2>Offline farm photo<span class="sub">${esc(o.fileName)}<button class="iconbtn" data-act="helpat" data-topic="Offline" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button></span></h2>${body}</section>`);
   }
 
   async _offOpen(file) {
@@ -974,7 +980,7 @@ class HamletFarmPanel extends HTMLElement {
       const f = m.form;
       const targets = [...this._snap.points.map((p) => [p.id, p.name]), ...this._snap.shapes.filter((x) => x.kind !== "sketch").map((x) => [x.id, x.name])];
       const users = (this._users || []);
-      this._setHTML(body, `<h2>${f.id ? "Edit document" : "Upload a quote or document"}<span class="sub"><button class="iconbtn" data-act="docclose" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+      this._setHTML(body, `<h2>${f.id ? "Edit document" : "Upload a quote or document"}<span class="sub"><button class="iconbtn" data-act="helpat" data-topic="Sharing quotes" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button><button class="iconbtn" data-act="docclose" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
         <div class="form">
           ${f.id ? "" : `<div class="field"><label for="df_file">File</label><span class="hint">PDF, JPG or PNG, up to 15 MB</span><input type="file" id="df_file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>`}
           <div class="field"><label for="df_title">Title</label><input type="text" id="df_title" value="${esc(f.title)}" maxlength="100" placeholder="e.g. Borehole 2 – new 7.5 kW pump"></div>
@@ -1156,7 +1162,7 @@ class HamletFarmPanel extends HTMLElement {
     const isNew = !this._point(d.id);
     this._setHTML(this.$("side"), `
       <section class="card" id="editor">
-        <h2>${isNew ? "New point" : "Edit point"}<span class="sub"><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <h2>${isNew ? "New point" : "Edit point"}<span class="sub"><button class="iconbtn" data-act="helpat" data-topic="Setting up" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
         <div class="typegrid">${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" aria-pressed="${d.type === k}"><ha-icon icon="${v.icon}"></ha-icon>${v.label}</button>`).join("")}</div>
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_name">Name</label><input type="text" id="f_name" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(t.label)}"></div>
@@ -1210,7 +1216,7 @@ class HamletFarmPanel extends HTMLElement {
     const d = this._draft; const isNew = !this._snap.shapes.some((s) => s.id === d.id);
     this._setHTML(this.$("side"), `
       <section class="card" id="editor">
-        <h2>${isNew ? "New line" : "Edit line"}<span class="sub"><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <h2>${isNew ? "New line" : "Edit line"}<span class="sub"><button class="iconbtn" data-act="helpat" data-topic="Lines" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
         <div class="chips">${Object.entries(SHAPES).map(([k, s]) => `<button class="chip" data-skind="${k}" aria-pressed="${d.shape_kind === k}"><i style="width:14px;height:4px;border-radius:2px;background:${s.color};display:inline-block;outline:1px solid rgba(0,0,0,.3)"></i>${s.label}</button>`).join("")}</div>
         ${d.shape_kind === "sketch" ? `<div class="chips" style="margin-top:8px">${SKETCH_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || SKETCH_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>` : ""}
         <div class="form" style="margin-top:8px">
@@ -1453,6 +1459,13 @@ class HamletFarmPanel extends HTMLElement {
         if (this._pen.plan && !this._layers.planning) { this._layers.planning = true; this._saveLayers(); this._toast("Planning lines are shown – switch them off under Layers"); }
         this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "help": case "helpat": {
+        if (ev.preventDefault) ev.preventDefault();
+        const h = this.$("help"); h.hidden = false; h.scrollTop = 0;
+        renderHelp(h, this._isAdmin, ds.act === "helpat" ? ds.topic : null);
+        break;
+      }
+      case "helpclose": { const h = this.$("help"); h.hidden = true; h.innerHTML = ""; break; }
       case "cardmeter": {
         this._readForm(); const d = this._draft; const e = d.entities || {};
         const tpl = [

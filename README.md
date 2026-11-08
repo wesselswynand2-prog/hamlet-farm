@@ -12,6 +12,8 @@ A satellite map of the client's farm in Home Assistant – like Google Maps, but
 | **Valve, gate, generator, solar, building, camera, weather station** | Open / closed, on / off, camera picture, any extra sensors. |
 | **Lines and land** | Water pipes, cables – **1 000 V** (orange), **3 300 V** (purple) and **MV** (red) – overhead power lines, fences, roads and camps / lands. Each shows its length (or hectares) and an optional detail like *95 mm² 4-core Cu SWA*. |
 
+📖 **[Manual](MANUAL.md)** – also built in: tap **Help** at the top of the Farm map page.
+
 Installs as a **Farm map** page in the Home Assistant sidebar (tabs when there are several farms), a dashboard card and summary sensors. Same install and update as the other Hamlet apps.
 
 ## Install on a client's Home Assistant
