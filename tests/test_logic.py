@@ -122,3 +122,13 @@ def test_cable_kinds():
     for k, n in (("cable", "Cable 1 000 V"), ("cable3300", "Cable 3 300 V"), ("mv", "MV cable")):
         s = logic.clean_shape({"kind": k, "info": "95 mm² 4-core Cu SWA", "coords": [[1, 2], [3, 4]]})
         assert s["name"] == n and s["info"] == "95 mm² 4-core Cu SWA"
+
+
+def test_eskom_specs():
+    p = pt(type="eskom", specs={"account": "1234567890", "pole": "MV-22/118", "kva": "100", "nmd": 70, "tariff": "Ruraflex"},
+           entities={"supply": "sensor.v", "power": "sensor.p"})
+    assert p["specs"] == {"kva": 100, "nmd": 70, "account": "1234567890", "pole": "MV-22/118", "tariff": "Ruraflex"}
+    st = logic.point_status(p, reader({"sensor.v": Reading("231", "V"), "sensor.p": Reading("35", "kW")}), energy_month=812.4)
+    assert st["status"] == "Power on · 50% load" and st["values"]["energy_month_kwh"] == 812.4
+    st = logic.point_status(p, reader({"sensor.v": Reading("231", "V"), "sensor.p": Reading("75", "kW")}))
+    assert st["status"] == "Above NMD · 107%" and st["cls"] == "warn"

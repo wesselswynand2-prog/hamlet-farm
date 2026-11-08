@@ -114,20 +114,29 @@ def clean_point(raw: dict) -> dict:
         "low_level": _float(raw.get("low_level"), 0, 100, 20),
         "alert": bool(raw.get("alert", True)),
         "notes": _txt(raw.get("notes"), 500),
-        "specs": _specs(raw.get("specs")) if ptype == "transformer" else {},
+        "specs": _specs(raw.get("specs"), ptype),
     }
 
 
-def _specs(raw: Any) -> dict:
-    """Transformer size and voltages, e.g. {"kva": 200, "primary": "11 kV", "secondary": "400 V"}."""
-    if not isinstance(raw, dict):
+SPEC_KEYS = {
+    # transformer: size and voltages, e.g. {"kva": 200, "primary": "11 kV", "secondary": "400 V"}
+    "transformer": {"num": ("kva",), "txt": ("primary", "secondary", "vector", "serial")},
+    # Eskom supply point: the client's Eskom account and the supply transformer on the pole
+    "eskom": {"num": ("kva", "nmd"), "txt": ("account", "pole", "meter", "supply", "tariff")},
+}
+
+
+def _specs(raw: Any, ptype: str) -> dict:
+    keys = SPEC_KEYS.get(ptype)
+    if not keys or not isinstance(raw, dict):
         return {}
     out: dict[str, Any] = {}
-    kva = _float(raw.get("kva"), 0, 100000)
-    if kva:
-        out["kva"] = round(kva, 1) if kva % 1 else int(kva)
-    for k in ("primary", "secondary", "vector", "serial"):
-        if v := _txt(raw.get(k), 30):
+    for k in keys["num"]:
+        n = _float(raw.get(k), 0, 100000)
+        if n:
+            out[k] = round(n, 1) if n % 1 else int(n)
+    for k in keys["txt"]:
+        if v := _txt(raw.get(k), 40):
             out[k] = v
     return out
 
@@ -251,7 +260,7 @@ def supply_ok(r: Reading | None) -> bool | None:
 
 # ---------------------------------------------------------------- status
 def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict | None = None,
-                 energy_today: float | None = None) -> dict:
+                 energy_today: float | None = None, energy_month: float | None = None) -> dict:
     """Work out what the map shows for one point.
 
     read(entity_id) -> Reading or None when the entity doesn't exist.
@@ -272,6 +281,8 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         values["energy_kwh"] = round(e, 3)
     if energy_today is not None:
         values["energy_today_kwh"] = round(energy_today, 2)
+    if energy_month is not None:
+        values["energy_month_kwh"] = round(energy_month, 1)
     lvl = percent(r.get("level"))
     if lvl is not None:
         values["level"] = round(lvl, 1)
@@ -350,13 +361,17 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     if sup is False:
         return out("No power", "bad", False)
 
-    # 6. transformer load (kW against kVA – an estimate, power factor taken as 1)
-    kva = (point.get("specs") or {}).get("kva")
-    if point.get("type") == "transformer" and kva and w is not None:
-        load = w / (kva * 1000) * 100
-        values["load_pct"] = round(load, 1)
-        if load > 100:
-            return out(f"Overloaded · {load:.0f}%", "bad" if load > 120 else "warn", False)
+    # 6. transformer load (kW against kVA – an estimate, power factor taken as 1);
+    #    for an Eskom point against its notified maximum demand (NMD) when known, else the transformer size
+    sp = point.get("specs") or {}
+    if point.get("type") in ("transformer", "eskom") and w is not None:
+        cap = (sp.get("nmd") or sp.get("kva")) if point["type"] == "eskom" else sp.get("kva")
+        if cap:
+            load = w / (cap * 1000) * 100
+            values["load_pct"] = round(load, 1)
+            if load > 100:
+                what = "Above NMD" if point["type"] == "eskom" and sp.get("nmd") else "Overloaded"
+                return out(f"{what} · {load:.0f}%", "bad" if load > 120 else "warn", False)
 
     # 6b. tank low
     low = point.get("low_level") or 0

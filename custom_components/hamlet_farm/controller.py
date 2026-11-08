@@ -194,33 +194,41 @@ class FarmController:
                     snap = pc.snapshot()
                 except Exception:  # noqa: BLE001
                     snap = None
-            statuses[p["id"]] = logic.point_status(p, self._read, snap, self._energy_today(p))
+            today, month = self._energy_used(p)
+            statuses[p["id"]] = logic.point_status(p, self._read, snap, today, month)
         self.statuses = statuses
         self.summary = logic.summary(self.points, statuses)
         self._notify_listeners()
 
-    def _energy_today(self, p: dict) -> float | None:
+    def _energy_used(self, p: dict) -> tuple[float | None, float | None]:
+        """kWh used today and this month, from the meter reading at midnight / the 1st."""
         ent = p.get("entities", {}).get("energy")
         if not ent:
-            return None
+            return None, None
         cur = logic.kwh(self._read(ent))
         if cur is None:
-            return None
-        base = self.energy_base.setdefault("base", {})
-        b = base.get(p["id"])
-        if b is None or cur < b:     # first reading today, or the meter was reset
-            base[p["id"]] = cur
-            self._save()
-            return 0.0
-        return cur - b
+            return None, None
+        out = []
+        for key in ("base", "mbase"):
+            base = self.energy_base.setdefault(key, {})
+            b = base.get(p["id"])
+            if b is None or cur < b:     # first reading this day / month, or the meter was reset
+                base[p["id"]] = cur
+                self._save()
+                out.append(0.0)
+            else:
+                out.append(cur - b)
+        return out[0], out[1]
 
     @callback
     def _tick(self, now: datetime | None = None) -> None:
         now = now or dt_util.now()
         today = dt_util.as_local(now).date().isoformat()
         if self.energy_base.get("date") != today:
-            # new day: today's usage starts from the meter reading now
-            self.energy_base = {"date": today, "base": {}}
+            # new day: today's usage starts from the meter reading now; a new month resets the month too
+            month = today[:7]
+            keep = self.energy_base.get("mbase", {}) if self.energy_base.get("month") == month else {}
+            self.energy_base = {"date": today, "base": {}, "month": month, "mbase": keep}
             self._save()
         self._link_pumps()
         self._recompute()

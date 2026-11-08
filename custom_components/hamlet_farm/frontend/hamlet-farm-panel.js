@@ -657,13 +657,18 @@ class HamletFarmPanel extends HTMLElement {
     const rows = [];
     const kv = (k, val) => rows.push(`<div class="kv"><span class="muted">${k}</span><span>${val}</span></div>`);
     if (v.power_w !== undefined) kv("Power", fmtW(v.power_w));
-    if (v.energy_today_kwh !== undefined) kv("Energy today", fmtKwh(v.energy_today_kwh));
+    if (v.energy_today_kwh !== undefined) kv("Used today", fmtKwh(v.energy_today_kwh));
+    if (v.energy_month_kwh !== undefined) kv("Used this month", fmtKwh(v.energy_month_kwh));
+    if (v.energy_kwh !== undefined) kv("Meter reading", `${Math.round(v.energy_kwh).toLocaleString()} kWh`);
     if (v.voltage !== undefined) kv("Voltage", `${v.voltage} V`);
     if (v.level !== undefined) kv("Level", `${fmtN(v.level, 0)}%`);
     if (v.pressure !== undefined) kv("Pressure", `${fmtN(v.pressure, 2)} ${esc(v.pressure_unit || "")}`);
     if (v.flow !== undefined) kv("Flow", `${fmtN(v.flow, 1)} ${esc(v.flow_unit || "")}`);
     if (v.angle !== undefined) kv("Pivot position", `${fmtN(v.angle, 0)}°`);
-    if (v.load_pct !== undefined) kv("Load", `≈ ${fmtN(v.load_pct, 0)}% of ${p.specs?.kva} kVA`);
+    if (v.load_pct !== undefined) {
+      const nmd = p.type === "eskom" && p.specs?.nmd;
+      kv("Load", `≈ ${fmtN(v.load_pct, 0)}% of ${nmd ? `${p.specs.nmd} kVA NMD` : `${p.specs?.kva} kVA`}`);
+    }
     if (p.type === "pivot" && p.radius) kv("Pivot size", `${p.radius} m radius · ≈ ${fmtN((Math.PI * p.radius * p.radius) / 10000, 1)} ha`);
     const cams = [];
     for (const e of p.extra || []) {
@@ -706,6 +711,7 @@ class HamletFarmPanel extends HTMLElement {
       <span class="dot ${cls}" style="--mc:${color}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
       <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
       <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
+      ${p.type === "eskom" ? `<a class="btn" href="tel:0860037566" title="Eskom contact centre 08600 37566 – have the account and pole number ready"><ha-icon icon="mdi:phone"></ha-icon>Report to Eskom</a>` : ""}
       ${p.pump_entry ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pumps page</button>` : ""}
       ${this._isAdmin ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
     this._setHTML(this.$("pg-now"), `<h2>Now</h2>
@@ -720,6 +726,14 @@ class HamletFarmPanel extends HTMLElement {
           ${sp.kva ? `<div class="kv"><span class="muted">Size</span><span>${esc(sp.kva)} kVA</span></div>` : ""}
           ${sp.primary || sp.secondary ? `<div class="kv"><span class="muted">Voltage</span><span>${esc(sp.primary || "?")} → ${esc(sp.secondary || "?")}</span></div>` : ""}
           ${sp.kva && sp.secondary ? (() => { const vv = parseFloat(sp.secondary) * (/kv/i.test(sp.secondary) ? 1000 : 1); return vv > 0 ? `<div class="kv"><span class="muted">Full-load current (out)</span><span>≈ ${fmtN((sp.kva * 1000) / (Math.sqrt(3) * vv), 0)} A</span></div>` : ""; })() : ""}` : ""}
+        ${p.type === "eskom" && Object.keys(sp).length ? `
+          ${sp.account ? `<div class="kv"><span class="muted">Eskom account</span><span>${esc(sp.account)} <button class="iconbtn" data-copy="${esc(sp.account)}" title="Copy" style="padding:2px"><ha-icon icon="mdi:content-copy" style="--mdc-icon-size:16px"></ha-icon></button></span></div>` : ""}
+          ${sp.meter ? `<div class="kv"><span class="muted">Meter number</span><span>${esc(sp.meter)}</span></div>` : ""}
+          ${sp.pole ? `<div class="kv"><span class="muted">Pole / transformer no.</span><span>${esc(sp.pole)}</span></div>` : ""}
+          ${sp.kva ? `<div class="kv"><span class="muted">Transformer size</span><span>${esc(sp.kva)} kVA</span></div>` : ""}
+          ${sp.nmd ? `<div class="kv"><span class="muted">NMD</span><span>${esc(sp.nmd)} kVA</span></div>` : ""}
+          ${sp.supply ? `<div class="kv"><span class="muted">Supply</span><span>${esc(sp.supply)}</span></div>` : ""}
+          ${sp.tariff ? `<div class="kv"><span class="muted">Tariff</span><span>${esc(sp.tariff)}</span></div>` : ""}` : ""}
         ${p.notes ? `<p class="small" style="white-space:pre-wrap;margin:0 0 10px">${esc(p.notes)}</p>` : ""}
         ${entRows.length ? `<h3>Linked to</h3>${entRows.join("")}<div class="small muted" style="margin-top:6px">Tap one to see its history.</div>` : ""}
         <div class="kv"><span class="muted">GPS</span><span>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span></div>`);
@@ -1056,6 +1070,17 @@ class HamletFarmPanel extends HTMLElement {
           <div class="field inline"><label for="f_sec">Secondary (out)</label><input type="text" id="f_sec" data-spec="secondary" list="dl-volt" value="${esc(d.specs?.secondary || "")}" placeholder="400 V" style="max-width:140px"></div>
           <datalist id="dl-kva">${[16, 25, 50, 64, 100, 160, 200, 315, 500, 630, 800, 1000, 1250, 1600, 2000].map((k) => `<option value="${k}"></option>`).join("")}</datalist>
           <datalist id="dl-volt">${["400 V", "525 V", "1000 V", "3300 V", "6.6 kV", "11 kV", "22 kV", "33 kV"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>` : ""}
+          ${d.type === "eskom" ? `
+          <div class="field inline"><label for="f_acc">Eskom account number</label><input type="text" id="f_acc" data-spec="account" value="${esc(d.specs?.account || "")}" inputmode="numeric" placeholder="e.g. 1234567890" style="max-width:180px"></div>
+          <div class="field inline"><label for="f_meter">Meter number</label><input type="text" id="f_meter" data-spec="meter" value="${esc(d.specs?.meter || "")}" style="max-width:180px"></div>
+          <div class="field inline"><label for="f_pole">Pole / transformer number</label><input type="text" id="f_pole" data-spec="pole" value="${esc(d.specs?.pole || "")}" placeholder="on the pole tag" style="max-width:180px"></div>
+          <div class="field inline"><label for="f_ekva">Transformer size</label><span class="small muted"><input type="number" id="f_ekva" data-spec="kva" min="0" step="any" list="dl-kva" value="${esc(d.specs?.kva ?? "")}"> kVA</span></div>
+          <div class="field inline"><label for="f_nmd">NMD<span class="hint" style="display:block">Notified maximum demand on the account</span></label><span class="small muted"><input type="number" id="f_nmd" data-spec="nmd" min="0" step="any" value="${esc(d.specs?.nmd ?? "")}"> kVA</span></div>
+          <div class="field inline"><label for="f_supply">Supply</label><input type="text" id="f_supply" data-spec="supply" list="dl-volt" value="${esc(d.specs?.supply || "")}" placeholder="22 kV" style="max-width:140px"></div>
+          <div class="field inline"><label for="f_tariff">Tariff</label><input type="text" id="f_tariff" data-spec="tariff" list="dl-tariff" value="${esc(d.specs?.tariff || "")}" style="max-width:180px"></div>
+          <datalist id="dl-kva">${[16, 25, 50, 64, 100, 160, 200, 315, 500, 630, 800, 1000].map((k) => `<option value="${k}"></option>`).join("")}</datalist>
+          <datalist id="dl-volt">${["230 V", "400 V", "1000 V", "11 kV", "22 kV", "33 kV"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>
+          <datalist id="dl-tariff">${["Landrate", "Landlight", "Ruraflex", "Nightsave Rural", "Homepower", "Homeflex", "Businessrate", "Miniflex", "Nightsave Urban", "Megaflex"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>` : ""}
           ${d.type === "pivot" ? `<div class="field inline"><label for="f_radius">Pivot radius<span class="hint" style="display:block">Centre to the last tower – draws the circle</span></label><span class="small muted"><input type="number" id="f_radius" data-f="radius" min="0" max="3000" value="${esc(d.radius)}"> m</span></div>` : ""}
           ${main.map(roleField).join("")}
         </div>
@@ -1202,7 +1227,7 @@ class HamletFarmPanel extends HTMLElement {
     const d = this._draft; const root = this.shadowRoot;
     if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); return; }
     d.specs = d.specs || {};
-    root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = el.dataset.spec === "kva" ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
+    root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = ["kva", "nmd"].includes(el.dataset.spec) ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
     root.querySelectorAll("[data-f]").forEach((el) => {
       const f = el.dataset.f;
@@ -1230,7 +1255,7 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
-      "pen", "scolor", "more", "notedel", "photo", "doc"];
+      "pen", "scolor", "more", "notedel", "photo", "doc", "copy"];
     const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
@@ -1244,6 +1269,7 @@ class HamletFarmPanel extends HTMLElement {
     if (ds.type) { this._readForm(); this._draft.type = ds.type; if (ds.type === "pivot" && !this._draft.radius) this._draft.radius = 400; this._renderSide(); return; }
     if (ds.skind) { this._readForm(); this._draft.shape_kind = ds.skind; if (!this._snap.shapes.some((x) => x.id === this._draft.id)) this._fm.drawPreview(ds.skind, this._draft.coords); this._renderSide(); return; }
     if (ds.doc) { this._openDoc(ds.doc); return; }
+    if (ds.copy) { try { await navigator.clipboard.writeText(ds.copy); this._toast("Copied"); } catch (e) { this._toast(ds.copy); } return; }
     if (ds.photo) { const lb = this.$("lightbox"); lb.querySelector("img").src = ds.photo; lb.hidden = false; return; }
     if (ds.more && !path.some((e) => e.dataset?.toggle)) { this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: ds.more }, bubbles: true, composed: true })); return; }
     if (ds.notedel) {
