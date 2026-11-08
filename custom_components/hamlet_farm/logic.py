@@ -163,6 +163,8 @@ def clean_shape(raw: dict) -> dict:
              "coords": coords[:2000 if kind == "sketch" else 500]}
     if info := _txt(raw.get("info"), 120):
         shape["info"] = info
+    if raw.get("show_len") and kind != "field":
+        shape["show_len"] = True   # length written on the map next to the line
     if kind == "sketch":
         color = str(raw.get("color") or "").lower()
         shape["color"] = color if color in SKETCH_COLORS else SKETCH_COLORS[0]

@@ -83,8 +83,8 @@ Who can see what: only the users you ticked, plus **every admin** of that Home A
 ## Measure and draw
 
 - **Measure** (ruler button on the map, for everyone): tap the map – or a point to snap to it – to measure a pipe or cable run; every corner shows the distance so far. **Area** closes the shape and shows hectares. Admins can **Save as line** to keep it as a pipe, power line or land.
-- **Draw** (admin, Edit → **Draw**): drag a finger or the mouse to draw on the map in red, yellow, white, green, blue, orange or black – mark a leak, a new trench or where to dig. **Undo** takes back the last stroke; tap a drawing in edit mode to rename, recolour or delete it.
-- Saved lines show their length when you hover or tap them, and land shows its hectares.
+- **Draw** (admin, Edit → **Draw**): drag a finger or the mouse to draw on the map in red, yellow, white, green, blue, orange or black – mark a leak, a new trench or where to dig. **Length** (on by default) writes each line's length next to it while you draw and on the map afterwards; the bar shows the last line's length. **Undo** takes back the last stroke; tap a drawing in edit mode to rename, recolour, turn the length on / off or delete it.
+- Saved lines show their length when you hover or tap them (or always, with *Show the length on the map* in the line's settings), and land shows its hectares. While drawing a line with **Line / land**, the bar shows the length so far.
 
 ## Alerts
 

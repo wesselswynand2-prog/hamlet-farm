@@ -405,12 +405,14 @@ class HamletFarmPanel extends HTMLElement {
     } else if (this._pen) {
       html = `<div class="banner"><ha-icon icon="mdi:draw"></ha-icon><span>Drag on the map to draw</span>
         ${SKETCH_COLORS.map((c) => `<button class="pen" data-pen="${c}" style="background:${c}" aria-pressed="${this._pen.color === c}" aria-label="Colour ${c}"></button>`).join("")}
+        <button class="btn" data-act="penlen" aria-pressed="${this._pen.len}" title="Write the length next to each line" style="${this._pen.len ? "background:#ffeb3b;color:#000;border-color:#ffeb3b" : ""}"><ha-icon icon="mdi:ruler"></ha-icon>Length</button>
+        ${this._pen.last ? `<span class="big">${fmtDist(this._pen.last)}</span>` : ""}
         <button class="btn" data-act="penundo" ${this._pen.strokes.length ? "" : "disabled"}>Undo</button>
         <button class="btn primary" data-act="pendone">Done</button></div>`;
     } else if (this._draw) {
       const d = SHAPES[this._draw.kind];
       const n = this._draw.coords.length; const need = this._draw.kind === "field" ? 3 : 2;
-      html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing <b>${esc(d.label.toLowerCase())}</b> – tap the map to add points (${n})</span>
+      html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing <b>${esc(d.label.toLowerCase())}</b> – tap the map to add points</span>${n > 1 ? `<span class="big">${this._draw.kind === "field" && n > 2 ? fmtArea(areaM2(this._draw.coords)) : fmtDist(lineLength(this._draw.coords))}</span>` : ""}
         <button class="btn" data-act="drawundo" ${n ? "" : "disabled"}>Undo</button><button class="btn" data-act="drawcancel">Cancel</button>
         <button class="btn primary" data-act="drawdone" ${n >= need ? "" : "disabled"}>Finish</button></div>`;
     } else if (this._placing) {
@@ -1115,6 +1117,7 @@ class HamletFarmPanel extends HTMLElement {
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
           ${d.shape_kind !== "sketch" ? `<div class="field"><label for="f_sinfo">Details</label><span class="hint">Size, cores, type – shown when the line is tapped</span><input type="text" id="f_sinfo" value="${esc(d.info || "")}" maxlength="120" placeholder="${esc(SHAPES[d.shape_kind].info || "")}"></div>` : ""}
+          ${d.shape_kind !== "field" ? `<div class="field inline"><label for="f_slen">Show the length on the map</label><label class="switch"><input type="checkbox" id="f_slen" ${d.show_len ? "checked" : ""}><span></span></label></div>` : ""}
           <div class="field inline"><span class="small muted">${d.coords.length} points${d.shape_kind === "field" ? ` · ≈ ${fmtN(this._area(d.coords) / 10000, 1)} ha` : ` · ≈ ${fmtN(this._length(d.coords), 0)} m`}</span></div>
         </div>
         <div class="actions">
@@ -1192,7 +1195,7 @@ class HamletFarmPanel extends HTMLElement {
     if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
-    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info };
+    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info, show_len: s.show_len };
     this._renderSide();
   }
 
@@ -1225,7 +1228,7 @@ class HamletFarmPanel extends HTMLElement {
 
   _readForm() {
     const d = this._draft; const root = this.shadowRoot;
-    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); return; }
+    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); if (root.getElementById("f_slen")) d.show_len = root.getElementById("f_slen").checked; return; }
     d.specs = d.specs || {};
     root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = ["kva", "nmd"].includes(el.dataset.spec) ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
@@ -1330,8 +1333,8 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "pen":
         this._draft = null; this._sel = null; this._fm.setSelected(null);
-        this._pen = { color: this._pen?.color || SKETCH_COLORS[0], strokes: [] };
-        this._fm.freehand(true, this._pen.color, (coords) => this._saveStroke(coords));
+        this._pen = { color: this._pen?.color || SKETCH_COLORS[0], strokes: [], len: this._penLen ?? true, last: 0 };
+        this._fm.freehand(true, this._pen.color, (coords) => this._saveStroke(coords), () => !!this._pen?.len);
         this._renderBanner(); this._renderSide(); break;
       case "penundo": {
         const id = this._pen.strokes.pop();
@@ -1339,6 +1342,7 @@ class HamletFarmPanel extends HTMLElement {
         this._renderBanner(); break;
       }
       case "pendone": this._stopPen(); this._renderBanner(); break;
+      case "penlen": this._pen.len = !this._pen.len; this._renderBanner(); break;
       case "pageback": this._closePage(); break;
       case "docnew": this._newDoc(ds.docpoint); break;
       case "docclose": this._closeDoc(); break;
@@ -1431,7 +1435,7 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "saveshape": {
         this._readForm(); const d = this._draft;
-        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info, show_len: d.show_len } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
         catch (e) { this.$("ferr").textContent = e.message; }
         break;
       }
@@ -1453,12 +1457,13 @@ class HamletFarmPanel extends HTMLElement {
   async _saveStroke(coords) {
     if (!this._pen) return;
     try {
-      const saved = await this._ws("save_shape", { shape: { kind: "sketch", name: "Drawing", color: this._pen.color, coords } });
+      this._pen.last = lineLength(coords);
+      const saved = await this._ws("save_shape", { shape: { kind: "sketch", name: "Drawing", color: this._pen.color, coords, show_len: this._pen.len } });
       this._pen?.strokes.push(saved.id);
     } catch (e) { this._toast(e.message); }
     this._renderBanner();
   }
-  _stopPen() { if (this._pen) { this._pen = null; this._fm.freehand(false); } }
+  _stopPen() { if (this._pen) { this._penLen = this._pen.len; this._pen = null; this._fm.freehand(false); } }
 
   _showMe(c) {
     const L = this._fm.L;

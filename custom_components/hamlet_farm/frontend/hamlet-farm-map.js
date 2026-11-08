@@ -292,7 +292,7 @@ export class FarmMap {
     const seen = new Set();
     for (const s of shapes) {
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info]);
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len]);
       const old = this.shapes.get(s.id);
       if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
@@ -306,6 +306,7 @@ export class FarmMap {
       } else if (s.kind === "sketch") {
         const casing = L.polyline(s.coords, { color: color === "#000000" ? "#fff" : "#000", weight: d.weight + 2, opacity: 0.3, interactive: false, lineCap: "round", lineJoin: "round" });
         const line = L.polyline(s.coords, opts);
+        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
         layer = L.layerGroup([casing, line]);
         line.on("click", (e) => this._shapeHit(e, s.id));
       } else {
@@ -317,6 +318,11 @@ export class FarmMap {
         line.on("click", (e) => this._shapeHit(e, s.id));
       }
       if (s.kind === "field") layer.on("click", (e) => this._shapeHit(e, s.id));
+      if (s.show_len && s.kind !== "field" && s.coords.length > 1) {
+        // length written at the end of the line
+        L.tooltip({ permanent: true, direction: "right", offset: [8, 0], className: "hf-measure-lbl", interactive: false })
+          .setLatLng(s.coords[s.coords.length - 1]).setContent(fmtDist(lineLength(s.coords))).addTo(layer);
+      }
       layer._key = key + (s.color || "");
       layer.addTo(this.shapeLayer);
       this.shapes.set(s.id, layer);
@@ -399,13 +405,13 @@ export class FarmMap {
   }
 
   /** Freehand pen: drag on the map to draw. onStroke(coords) gets each finished stroke. */
-  freehand(on, color, onStroke) {
+  freehand(on, color, onStroke, showLen = () => false) {
     const L = this.L; const el = this.container; const map = this.map;
     if (this._fh) { el.removeEventListener("pointerdown", this._fh.down, true); window.removeEventListener("pointermove", this._fh.move, true); window.removeEventListener("pointerup", this._fh.up, true); this._fh = null; }
     this._penColor = color;
     if (!on) { map.dragging.enable(); el.style.cursor = this.editing ? "crosshair" : ""; return; }
     map.dragging.disable(); el.style.cursor = "crosshair";
-    let pts = null; let live = null;
+    let pts = null; let live = null; let liveLbl = null;
     const ll = (e) => { const r = el.getBoundingClientRect(); const p = map.containerPointToLatLng(L.point(e.clientX - r.left, e.clientY - r.top)); return [p.lat, p.lng]; };
     const down = (e) => {
       if (e.button !== undefined && e.button !== 0) return;
@@ -413,6 +419,7 @@ export class FarmMap {
       e.preventDefault(); e.stopPropagation();
       pts = [ll(e)];
       live = L.polyline(pts, { color: this._penColor, weight: 4, opacity: 0.95, lineCap: "round", lineJoin: "round", interactive: false }).addTo(this.drawLayer);
+      liveLbl = showLen() ? L.tooltip({ permanent: true, direction: "right", offset: [12, 0], className: "hf-measure-lbl" }).setLatLng(pts[0]).setContent("0 m").addTo(this.drawLayer) : null;
     };
     const move = (e) => {
       if (!pts) return;
@@ -422,11 +429,13 @@ export class FarmMap {
       const a = map.latLngToContainerPoint(last), b = map.latLngToContainerPoint(p);
       if (Math.hypot(a.x - b.x, a.y - b.y) < 3) return;
       pts.push(p); live.setLatLngs(pts);
+      if (liveLbl) liveLbl.setLatLng(p).setContent(fmtDist(lineLength(pts)));
     };
     const up = () => {
       if (!pts) return;
       const done = pts; pts = null;
       this.drawLayer.removeLayer(live); live = null;
+      if (liveLbl) { this.drawLayer.removeLayer(liveLbl); liveLbl = null; }
       if (done.length > 1) onStroke(done.slice(0, 2000));
     };
     el.addEventListener("pointerdown", down, true); window.addEventListener("pointermove", move, true); window.addEventListener("pointerup", up, true);
