@@ -663,6 +663,7 @@ class HamletFarmPanel extends HTMLElement {
     if (v.pressure !== undefined) kv("Pressure", `${fmtN(v.pressure, 2)} ${esc(v.pressure_unit || "")}`);
     if (v.flow !== undefined) kv("Flow", `${fmtN(v.flow, 1)} ${esc(v.flow_unit || "")}`);
     if (v.angle !== undefined) kv("Pivot position", `${fmtN(v.angle, 0)}°`);
+    if (v.load_pct !== undefined) kv("Load", `≈ ${fmtN(v.load_pct, 0)}% of ${p.specs?.kva} kVA`);
     if (p.type === "pivot" && p.radius) kv("Pivot size", `${p.radius} m radius · ≈ ${fmtN((Math.PI * p.radius * p.radius) / 10000, 1)} ha`);
     const cams = [];
     for (const e of p.extra || []) {
@@ -713,7 +714,12 @@ class HamletFarmPanel extends HTMLElement {
         ${ctl}
         ${rows.length ? `<div style="margin-top:14px">${rows.join("")}</div>` : ""}
         ${cams.join("")}`);
+    const sp = p.specs || {};
     this._setHTML(this.$("pg-info"), `<h2>About</h2>
+        ${p.type === "transformer" && (sp.kva || sp.primary || sp.secondary) ? `
+          ${sp.kva ? `<div class="kv"><span class="muted">Size</span><span>${esc(sp.kva)} kVA</span></div>` : ""}
+          ${sp.primary || sp.secondary ? `<div class="kv"><span class="muted">Voltage</span><span>${esc(sp.primary || "?")} → ${esc(sp.secondary || "?")}</span></div>` : ""}
+          ${sp.kva && sp.secondary ? (() => { const vv = parseFloat(sp.secondary) * (/kv/i.test(sp.secondary) ? 1000 : 1); return vv > 0 ? `<div class="kv"><span class="muted">Full-load current (out)</span><span>≈ ${fmtN((sp.kva * 1000) / (Math.sqrt(3) * vv), 0)} A</span></div>` : ""; })() : ""}` : ""}
         ${p.notes ? `<p class="small" style="white-space:pre-wrap;margin:0 0 10px">${esc(p.notes)}</p>` : ""}
         ${entRows.length ? `<h3>Linked to</h3>${entRows.join("")}<div class="small muted" style="margin-top:6px">Tap one to see its history.</div>` : ""}
         <div class="kv"><span class="muted">GPS</span><span>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span></div>`);
@@ -732,6 +738,7 @@ class HamletFarmPanel extends HTMLElement {
       ${closed ? `<div class="kv"><span class="muted">Area</span><span>${fmtArea(areaM2(sh.coords))}</span></div>
         <div class="kv"><span class="muted">Distance round</span><span>${fmtDist(lineLength([...sh.coords, sh.coords[0]]))}</span></div>`
         : `<div class="kv"><span class="muted">Length</span><span>${fmtDist(lineLength(sh.coords))}</span></div>`}
+      ${sh.info ? `<div class="kv"><span class="muted">Details</span><span>${esc(sh.info)}</span></div>` : ""}
       <div class="kv"><span class="muted">Corners</span><span>${sh.coords.length}</span></div>`);
     this._setHTML(this.$("pg-info"), "");
     this.$("pg-info").hidden = true;
@@ -1043,6 +1050,12 @@ class HamletFarmPanel extends HTMLElement {
           <div class="field"><label for="f_name">Name</label><input type="text" id="f_name" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(t.label)}"></div>
           ${["pump", "booster", "other"].includes(d.type) && this._pumps.length ? `<div class="field"><label for="f_pump">Hamlet Pump</label><span class="hint">Link a pump from the Pumps page – status, protection and modes come from there</span>
             <select id="f_pump" data-f="pump_entry"><option value="">– not linked –</option>${this._pumps.map((pp) => `<option value="${esc(pp.entry_id)}" ${d.pump_entry === pp.entry_id ? "selected" : ""}>${esc(pp.name)}</option>`).join("")}</select></div>` : ""}
+          ${d.type === "transformer" ? `
+          <div class="field inline"><label for="f_kva">Size</label><span class="small muted"><input type="number" id="f_kva" data-spec="kva" min="0" step="any" list="dl-kva" value="${esc(d.specs?.kva ?? "")}"> kVA</span></div>
+          <div class="field inline"><label for="f_prim">Primary (in)</label><input type="text" id="f_prim" data-spec="primary" list="dl-volt" value="${esc(d.specs?.primary || "")}" placeholder="11 kV" style="max-width:140px"></div>
+          <div class="field inline"><label for="f_sec">Secondary (out)</label><input type="text" id="f_sec" data-spec="secondary" list="dl-volt" value="${esc(d.specs?.secondary || "")}" placeholder="400 V" style="max-width:140px"></div>
+          <datalist id="dl-kva">${[16, 25, 50, 64, 100, 160, 200, 315, 500, 630, 800, 1000, 1250, 1600, 2000].map((k) => `<option value="${k}"></option>`).join("")}</datalist>
+          <datalist id="dl-volt">${["400 V", "525 V", "1000 V", "3300 V", "6.6 kV", "11 kV", "22 kV", "33 kV"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>` : ""}
           ${d.type === "pivot" ? `<div class="field inline"><label for="f_radius">Pivot radius<span class="hint" style="display:block">Centre to the last tower – draws the circle</span></label><span class="small muted"><input type="number" id="f_radius" data-f="radius" min="0" max="3000" value="${esc(d.radius)}"> m</span></div>` : ""}
           ${main.map(roleField).join("")}
         </div>
@@ -1076,6 +1089,7 @@ class HamletFarmPanel extends HTMLElement {
         ${d.shape_kind === "sketch" ? `<div class="chips" style="margin-top:8px">${SKETCH_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || SKETCH_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>` : ""}
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
+          ${d.shape_kind !== "sketch" ? `<div class="field"><label for="f_sinfo">Details</label><span class="hint">Size, cores, type – shown when the line is tapped</span><input type="text" id="f_sinfo" value="${esc(d.info || "")}" maxlength="120" placeholder="${esc(SHAPES[d.shape_kind].info || "")}"></div>` : ""}
           <div class="field inline"><span class="small muted">${d.coords.length} points${d.shape_kind === "field" ? ` · ≈ ${fmtN(this._area(d.coords) / 10000, 1)} ha` : ` · ≈ ${fmtN(this._length(d.coords), 0)} m`}</span></div>
         </div>
         <div class="actions">
@@ -1127,7 +1141,7 @@ class HamletFarmPanel extends HTMLElement {
   _newPoint(lat, lng) {
     this._placing = false;
     const id = Math.random().toString(16).slice(2, 10);
-    this._draft = { kind: "point", id, name: "", type: "pump", lat, lng, entities: {}, extra: [], pump_entry: null, radius: 400, low_level: 20, alert: true, notes: "" };
+    this._draft = { kind: "point", id, name: "", type: "pump", lat, lng, entities: {}, extra: [], pump_entry: null, radius: 400, low_level: 20, alert: true, notes: "", specs: {} };
     this._sel = null; this._fm.setSelected(null);
     this._renderBanner(); this._renderSide();
     this._fm.update(this._mapSnap());   // show the new point on the map straight away
@@ -1153,7 +1167,7 @@ class HamletFarmPanel extends HTMLElement {
     if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
-    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color };
+    this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info };
     this._renderSide();
   }
 
@@ -1186,7 +1200,9 @@ class HamletFarmPanel extends HTMLElement {
 
   _readForm() {
     const d = this._draft; const root = this.shadowRoot;
-    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; return; }
+    if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); return; }
+    d.specs = d.specs || {};
+    root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = el.dataset.spec === "kva" ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
     root.querySelectorAll("[data-f]").forEach((el) => {
       const f = el.dataset.f;
@@ -1389,7 +1405,7 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "saveshape": {
         this._readForm(); const d = this._draft;
-        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
         catch (e) { this.$("ferr").textContent = e.message; }
         break;
       }

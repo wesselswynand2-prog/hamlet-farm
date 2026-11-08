@@ -7,6 +7,7 @@ export const TYPES = {
   booster: { label: "Pressure pump", icon: "mdi:pump", roles: ["control", "running", "power", "pressure", "flow", "fault"] },
   pivot: { label: "Centre pivot", icon: "mdi:sprinkler-variant", roles: ["control", "running", "angle", "power", "fault", "pressure"] },
   eskom: { label: "Eskom point", icon: "mdi:transmission-tower", roles: ["supply", "power", "energy", "control"] },
+  transformer: { label: "Transformer", icon: "mdi:flash-triangle", roles: ["supply", "power", "energy", "fault"] },
   tank: { label: "Tank / dam", icon: "mdi:water", roles: ["level", "flow"] },
   valve: { label: "Valve", icon: "mdi:valve", roles: ["control", "flow", "pressure"] },
   gate: { label: "Gate", icon: "mdi:gate", roles: ["control", "running"] },
@@ -31,8 +32,10 @@ export const ROLES = {
 };
 export const SHAPES = {
   pipe: { label: "Water pipe", color: "#5aaeff", weight: 3, dash: null },
-  power: { label: "Overhead power line", color: "#ffcc33", weight: 2.5, dash: "8 6" },
-  cable: { label: "Electrical cable", color: "#ff6a00", weight: 3, dash: "14 5 3 5" },
+  cable: { label: "Cable 1 000 V", color: "#ff6a00", weight: 3, dash: "14 5 3 5", info: "e.g. 95 mm² 4-core Cu SWA" },
+  cable3300: { label: "Cable 3 300 V", color: "#c86bff", weight: 3.5, dash: "14 4 3 4 3 4", info: "e.g. 50 mm² 3-core Cu SWA 3.3 kV" },
+  mv: { label: "MV cable", color: "#ff2d55", weight: 4, dash: "18 5", info: "e.g. 11 kV 70 mm² 3-core XLPE" },
+  power: { label: "Overhead power line", color: "#ffcc33", weight: 2.5, dash: "8 6", info: "e.g. 22 kV Hare conductor" },
   fence: { label: "Fence", color: "#f2f2f2", weight: 1.5, dash: "2 5" },
   road: { label: "Road", color: "#e0cfa6", weight: 4, dash: null },
   field: { label: "Land / camp", color: "#8fd16a", weight: 2, dash: null },
@@ -63,7 +66,7 @@ export const fmtArea = (m2) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(m2 >= 1e6 
 export const CLS_COLOR = {
   run: "#1baf7a", on: "#2a78d6", off: "#5f6368", warn: "#e08a00", bad: "#db4437", offline: "#8a8f96", info: "#ffffff",
 };
-export const clsColor = (cls, type) => (cls === "on" && (type === "eskom" || type === "solar" || type === "generator") ? "#eda100" : CLS_COLOR[cls] || CLS_COLOR.info);
+export const clsColor = (cls, type) => (cls === "on" && (type === "eskom" || type === "transformer" || type === "solar" || type === "generator") ? "#eda100" : CLS_COLOR[cls] || CLS_COLOR.info);
 
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const num = (v) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
@@ -72,6 +75,11 @@ export const fmtW = (w) => { w = num(w); if (w === null) return "–"; const a =
 /** One short value to show under the marker. */
 export function shortValue(p, st) {
   const v = st?.values || {};
+  if (p.type === "transformer") {
+    const kva = p.specs?.kva;
+    if (v.load_pct !== undefined) return kva ? `${Math.round(v.load_pct)}% · ${kva} kVA` : `${Math.round(v.load_pct)}%`;
+    return kva ? `${kva} kVA` : "";
+  }
   if (p.type === "pivot" && v.angle !== undefined) return `${Math.round(v.angle)}°`;
   if (v.level !== undefined && (p.type === "tank" || p.type === "pump")) return `${Math.round(v.level)}%`;
   if (v.power_w !== undefined && (st?.running || p.type === "eskom" || p.type === "solar")) return fmtW(v.power_w);
@@ -284,7 +292,7 @@ export class FarmMap {
     const seen = new Set();
     for (const s of shapes) {
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords, s.color]);
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info]);
       const old = this.shapes.get(s.id);
       if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
@@ -304,7 +312,7 @@ export class FarmMap {
         // dark casing underneath so lines read on satellite imagery
         const casing = L.polyline(s.coords, { color: "#000", weight: d.weight + 2.5, opacity: 0.35, interactive: false });
         const line = L.polyline(s.coords, opts);
-        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}`, { sticky: true });
+        line.bindTooltip(`${esc(s.name)} · ${fmtDist(lineLength(s.coords))}${s.info ? `<br><small>${esc(s.info)}</small>` : ""}`, { sticky: true });
         layer = L.layerGroup([casing, line]);
         line.on("click", (e) => this._shapeHit(e, s.id));
       }

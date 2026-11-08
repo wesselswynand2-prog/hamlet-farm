@@ -37,7 +37,6 @@ def test_sketch_shape():
 
 
 def test_clean_shape():
-    assert logic.clean_shape({"kind": "cable", "coords": [[1, 2], [3, 4]]})["name"] == "Electrical cable"
     s = logic.clean_shape({"kind": "pipe", "coords": [[1, 2], [3, 4]]})
     assert s["name"] == "Water pipe"
     with pytest.raises(ValueError):
@@ -106,3 +105,20 @@ def test_summary():
            "c": {"alert": True, "cls": "offline"}}
     s = logic.summary(pts, sts)
     assert s["running"] == 1 and s["alerts"] == 1 and s["offline"] == 1 and s["grid_w"] == 500 and s["grid_kwh_today"] == 3
+
+
+def test_transformer():
+    p = pt(type="transformer", specs={"kva": "200", "primary": "11 kV", "secondary": "400 V", "junk": "x"},
+           entities={"supply": "sensor.v", "power": "sensor.p"})
+    assert p["specs"] == {"kva": 200, "primary": "11 kV", "secondary": "400 V"}
+    st = logic.point_status(p, reader({"sensor.v": Reading("230", "V"), "sensor.p": Reading("90", "kW")}))
+    assert st["status"] == "Power on · 45% load" and st["values"]["load_pct"] == 45
+    st = logic.point_status(p, reader({"sensor.v": Reading("230", "V"), "sensor.p": Reading("230", "kW")}))
+    assert st["cls"] == "warn" and st["status"].startswith("Overloaded")
+    assert pt(type="pump", specs={"kva": 5})["specs"] == {}
+
+
+def test_cable_kinds():
+    for k, n in (("cable", "Cable 1 000 V"), ("cable3300", "Cable 3 300 V"), ("mv", "MV cable")):
+        s = logic.clean_shape({"kind": k, "info": "95 mm² 4-core Cu SWA", "coords": [[1, 2], [3, 4]]})
+        assert s["name"] == n and s["info"] == "95 mm² 4-core Cu SWA"

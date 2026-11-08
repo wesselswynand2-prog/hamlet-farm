@@ -14,6 +14,7 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "booster": ("Pressure pump", "mdi:pump"),
     "pivot": ("Centre pivot", "mdi:sprinkler-variant"),
     "eskom": ("Eskom point", "mdi:transmission-tower"),
+    "transformer": ("Transformer", "mdi:flash-triangle"),
     "tank": ("Tank / dam", "mdi:water"),
     "valve": ("Valve", "mdi:valve"),
     "gate": ("Gate", "mdi:gate"),
@@ -24,7 +25,8 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "building": ("Building", "mdi:home-outline"),
     "other": ("Other", "mdi:map-marker"),
 }
-SHAPE_KINDS = {"pipe": "Water pipe", "power": "Overhead power line", "cable": "Electrical cable", "fence": "Fence", "road": "Road", "field": "Land / camp",
+SHAPE_KINDS = {"pipe": "Water pipe", "power": "Overhead power line", "cable": "Cable 1 000 V", "cable3300": "Cable 3 300 V",
+               "mv": "MV cable", "fence": "Fence", "road": "Road", "field": "Land / camp",
                "sketch": "Drawing"}
 SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000")
 
@@ -112,7 +114,22 @@ def clean_point(raw: dict) -> dict:
         "low_level": _float(raw.get("low_level"), 0, 100, 20),
         "alert": bool(raw.get("alert", True)),
         "notes": _txt(raw.get("notes"), 500),
+        "specs": _specs(raw.get("specs")) if ptype == "transformer" else {},
     }
+
+
+def _specs(raw: Any) -> dict:
+    """Transformer size and voltages, e.g. {"kva": 200, "primary": "11 kV", "secondary": "400 V"}."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    kva = _float(raw.get("kva"), 0, 100000)
+    if kva:
+        out["kva"] = round(kva, 1) if kva % 1 else int(kva)
+    for k in ("primary", "secondary", "vector", "serial"):
+        if v := _txt(raw.get(k), 30):
+            out[k] = v
+    return out
 
 
 def clean_shape(raw: dict) -> dict:
@@ -135,6 +152,8 @@ def clean_shape(raw: dict) -> dict:
         pid = new_id()
     shape = {"id": pid, "kind": kind, "name": _txt(raw.get("name"), 60) or SHAPE_KINDS[kind],
              "coords": coords[:2000 if kind == "sketch" else 500]}
+    if info := _txt(raw.get("info"), 120):
+        shape["info"] = info
     if kind == "sketch":
         color = str(raw.get("color") or "").lower()
         shape["color"] = color if color in SKETCH_COLORS else SKETCH_COLORS[0]
@@ -272,7 +291,7 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     running = None
     if (rd := r.get("running")) is not None:
         running = to_bool(rd.state)
-    elif w is not None and point.get("type") not in ("eskom", "solar", "building", "weather"):
+    elif w is not None and point.get("type") not in ("eskom", "transformer", "solar", "building", "weather"):
         running = w >= RUNNING_MIN_W
     elif on is not None and point.get("type") in ("pump", "booster", "pivot", "generator"):
         running = on
@@ -331,7 +350,15 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     if sup is False:
         return out("No power", "bad", False)
 
-    # 6. tank low
+    # 6. transformer load (kW against kVA – an estimate, power factor taken as 1)
+    kva = (point.get("specs") or {}).get("kva")
+    if point.get("type") == "transformer" and kva and w is not None:
+        load = w / (kva * 1000) * 100
+        values["load_pct"] = round(load, 1)
+        if load > 100:
+            return out(f"Overloaded · {load:.0f}%", "bad" if load > 120 else "warn", False)
+
+    # 6b. tank low
     low = point.get("low_level") or 0
     if lvl is not None and low and lvl < low:
         return out(f"Low · {lvl:.0f}%", "warn")
@@ -350,6 +377,8 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     if on is False or running is False:
         return out("Off", "off", False)
     if sup is True:
+        if "load_pct" in values:
+            return out(f"Power on · {values['load_pct']:.0f}% load", "on", False)
         return out("Power on", "on", False)
     if lvl is not None:
         return out(f"{lvl:.0f}%", "on", False)
