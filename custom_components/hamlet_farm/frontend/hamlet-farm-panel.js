@@ -65,6 +65,7 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .ovl { position: absolute; z-index: 500; display: flex; gap: 6px; }
 .ovl.tr { top: 10px; right: 10px; flex-direction: column; align-items: flex-end; }
 .ovl.tl { top: 10px; left: 56px; right: 64px; z-index: 1001; }
+.ovl.tl { pointer-events: none; } .ovl.tl > * { pointer-events: auto; } /* the empty part of the search strip must not cover the Satellite / Hybrid buttons */
 @media (max-width: 599px) { .ovl.tl { right: 10px; } .ovl.tr { top: 52px; } .sbox { max-width: none; } }
 .ovl.bl { bottom: 22px; left: 10px; right: 10px; justify-content: center; pointer-events: none; }
 .ovl.bl > * { pointer-events: auto; }
