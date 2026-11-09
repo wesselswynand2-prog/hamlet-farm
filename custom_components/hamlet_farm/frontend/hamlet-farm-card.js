@@ -1,5 +1,5 @@
 /* Hamlet Farm – dashboard card: the farm's satellite map with live points. Tap a point to open it on the Farm map page. */
-import { MAP_CSS, FarmMap, TYPES, loadLeaflet, clsColor, esc, shortValue } from "./hamlet-farm-map.js";
+import { MAP_CSS, FarmMap, TYPES, loadLeaflet, pointColor, esc, shortValue } from "./hamlet-farm-map.js";
 
 const DOMAIN = "hamlet_farm";
 const BASE = new URL(".", import.meta.url).href;
@@ -85,7 +85,7 @@ class HamletFarmCard extends HTMLElement {
     const p = this._snap.points.find((x) => x.id === id); if (!p) return;
     const st = this._snap.statuses?.[id] || {};
     const sv = shortValue(p, st); const extra = sv && !(st.status || "").includes(sv) ? ` · ${esc(sv)}` : "";
-    const html = `<div class="pop"><b>${esc(p.name)}</b><div class="st"><i style="background:${clsColor(st.cls || "info", p.type)};outline:1px solid #0003"></i>${esc(st.status || TYPES[p.type]?.label || "")}
+    const html = `<div class="pop"><b>${esc(p.name)}</b><div class="st"><i style="background:${pointColor(p, st.cls || "info")};outline:1px solid #0003"></i>${esc(st.status || TYPES[p.type]?.label || "")}
 ${extra}</div><button data-go="${esc(id)}">Open on the map page</button></div>`;
     if (refresh) { if (this._pop?.isOpen()) this._pop.setContent(html); return; }
     this._popId = id;

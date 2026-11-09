@@ -68,6 +68,24 @@ export const CLS_COLOR = {
 };
 export const clsColor = (cls, type) => (cls === "on" && (type === "eskom" || type === "transformer" || type === "solar" || type === "generator") ? "#eda100" : CLS_COLOR[cls] || CLS_COLOR.info);
 
+/** Colours a point can be given (Edit → point → Colour). */
+export const POINT_COLORS = ["#2a78d6", "#03a9f4", "#00a99d", "#1baf7a", "#8bc34a", "#f5c400", "#ff8a00", "#e53935", "#e91e63", "#8e44ad", "#8d6e63", "#607d8b", "#222222", "#ffffff"];
+/** Light colours get a dark icon, dark colours a white one. */
+export function inkOn(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ""); if (!m) return "#fff";
+  const [r, g, b] = m.slice(1).map((x) => parseInt(x, 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "#222" : "#fff";
+}
+/**
+ * The marker colour for a point. A colour picked for the point replaces the normal / on / off colours;
+ * running, attention, fault and offline keep their status colour so a problem is never hidden.
+ */
+export function pointColor(p, cls) {
+  if (p?.color && ["info", "on", "off"].includes(cls || "info")) return p.color;
+  return clsColor(cls || "info", p?.type);
+}
+export const pointIcon = (p) => p?.icon || TYPES[p?.type]?.icon || "mdi:map-marker";
+
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 export const num = (v) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
 export const fmtW = (w) => { w = num(w); if (w === null) return "–"; const a = Math.abs(w); return a >= 1000 ? `${(w / 1000).toFixed(a >= 10000 ? 0 : 1)} kW` : `${Math.round(w)} W`; };
@@ -221,7 +239,8 @@ export class FarmMap {
   _iconHtml(p, st) {
     const cls = st?.cls || "info";
     const val = shortValue(p, st);
-    return `<div class="hf-mk ${cls}" style="--mc:${clsColor(cls, p.type)}"><ha-icon icon="${TYPES[p.type]?.icon || "mdi:map-marker"}"></ha-icon></div>
+    const col = pointColor(p, cls); const custom = col !== clsColor(cls, p.type);
+    return `<div class="hf-mk ${custom ? "custom" : cls}" style="--mc:${col};${custom ? `color:${inkOn(col)}` : ""}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></div>
       <div class="hf-lbl">${esc(p.name)}${val ? `<small>${esc(val)}</small>` : ""}</div>`;
   }
 

@@ -2,7 +2,7 @@
 import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
 import { HISTORY_CSS, renderHistory } from "./hamlet-farm-history.js";
 import { SERVICE_CSS, installFieldsHtml, installRows, hasService, serviceTabHtml, serviceViewHtml, serviceFormHtml, printReport, dueText, updateServiceTotals } from "./hamlet-farm-service.js";
-import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS } from "./hamlet-farm-map.js";
+import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS, POINT_COLORS, pointColor, pointIcon, inkOn } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
@@ -83,6 +83,7 @@ h3 { font-size: 14px; font-weight: 500; margin: 16px 0 6px; }
 .layers .btn { color: #fff; border-color: rgba(255,255,255,.3); width: 100%; justify-content: center; margin-top: 6px; }
 .banner .big { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .pen { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); cursor: pointer; padding: 0; }
+.pen.auto { background: var(--secondary-background-color, #eee); color: var(--primary-text-color); font: 600 12px/1 inherit; display: inline-flex; align-items: center; justify-content: center; border-color: var(--line); }
 .pen[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.6); transform: scale(1.1); }
 .sbox { position: relative; flex: 1; max-width: 420px; display: flex; flex-direction: column; }
 .sres { margin-top: 6px; background: var(--card); color: var(--primary-text-color); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45); max-height: min(62vh, 520px); overflow-y: auto; padding: 4px 0; }
@@ -266,6 +267,8 @@ details summary { cursor: pointer; font-size: 14px; color: var(--accent); paddin
 `;
 
 const ICON = (t) => TYPES[t]?.icon || "mdi:map-marker";
+/** style for a round point badge: the point's own colour (or status colour) with a readable icon colour */
+const dotStyle = (p, cls) => { const c = pointColor(p, cls); return c === clsColor(cls, p.type) ? `--mc:${c}` : `--mc:${c};color:${inkOn(c)};border:0`; };
 
 class HamletFarmPanel extends HTMLElement {
   constructor() {
@@ -423,7 +426,7 @@ class HamletFarmPanel extends HTMLElement {
     const base = this._baseOverride || s.settings?.base || "satellite";
     this._fm.setBase(base);
     this._renderBase(base);
-    this._fm.update(this._mapSnap());
+    this._fm.update(this._mapPreview());
     this._fm.setOffline(s.offline, s.tile_url, this._layers?.photo !== false);
     if (this._first) { this._first = false; this._fm.setView(s.view, s.points, s.shapes, { lat: this._hass.config?.latitude, lng: this._hass.config?.longitude }); }
     if (this._sel && !this._point(this._sel)) this._sel = null;
@@ -432,6 +435,13 @@ class HamletFarmPanel extends HTMLElement {
     if (this._page) { if (this._pageTarget()) this._renderPage(); else this._closePage(); }
     this._renderLayers();
     this._renderBanner();
+  }
+
+  /** Snapshot for the map with the point being edited shown as it is now (colour / icon preview). */
+  _mapPreview() {
+    const s = this._mapSnap(); const d = this._draft;
+    if (!d || d.kind !== "point") return s;
+    return { ...s, points: s.points.map((p) => (p.id === d.id ? { ...p, color: d.color, icon: d.icon } : p)) };
   }
 
   /** Snapshot for the map, with a new (not yet saved) point shown too. */
@@ -759,7 +769,7 @@ class HamletFarmPanel extends HTMLElement {
   _rowHtml(p) {
     const st = this._st(p.id); const cls = st.cls || "info";
     const val = shortValue(p, st);
-    return `<button class="row" data-pt="${esc(p.id)}"><span class="dot ${cls}" style="--mc:${clsColor(cls, p.type)}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
+    return `<button class="row" data-pt="${esc(p.id)}"><span class="dot ${cls}" style="${dotStyle(p, cls)}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></span>
       <span class="nm"><div>${esc(p.name)}${this._snap.note_counts?.[p.id] ? `<span class="ncount"><ha-icon icon="mdi:note-text-outline"></ha-icon>${this._snap.note_counts[p.id]}</span>` : ""}</div><div class="st ${cls}">${esc(st.status || TYPES[p.type]?.label || "")}</div></span><span class="val">${esc(val)}</span></button>`;
   }
 
@@ -822,7 +832,7 @@ class HamletFarmPanel extends HTMLElement {
     const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
     this._setHTML(this.$("pg-head"), `
       <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
-      <span class="dot ${cls}" style="--mc:${color}"><ha-icon icon="${ICON(p.type)}"></ha-icon></span>
+      <span class="dot ${cls}" style="${dotStyle(p, cls)}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></span>
       <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
       <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
       ${p.type === "eskom" ? `<a class="btn" href="tel:0860037566" title="Eskom contact centre 08600 37566 – have the account and pole number ready"><ha-icon icon="mdi:phone"></ha-icon>Report to Eskom</a>` : ""}
@@ -1280,6 +1290,19 @@ class HamletFarmPanel extends HTMLElement {
         <div class="typegrid">${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" aria-pressed="${d.type === k}"><ha-icon icon="${v.icon}"></ha-icon>${v.label}</button>`).join("")}</div>
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_name">Name</label><input type="text" id="f_name" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(t.label)}"></div>
+          <div class="field"><label>Colour on the map</label><span class="hint">Running, faults and offline still show their status colour</span>
+            <div class="chips" style="gap:6px;margin-top:4px">
+              <button class="pen auto" data-pcolor="auto" aria-pressed="${!d.color}" title="Automatic (status colours)" aria-label="Automatic colour">A</button>
+              ${POINT_COLORS.map((c) => `<button class="pen" data-pcolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${d.color === c}" aria-label="Colour ${c}"></button>`).join("")}
+              <input type="color" id="f_pcolor" value="${esc(d.color || "#2a78d6")}" title="Any colour" style="width:30px;height:26px;padding:0;border:0;background:none"></div></div>
+          <div class="field inline"><label for="f_icon">Icon</label><span style="display:flex;gap:6px;align-items:center">
+            <span class="dot" style="${dotStyle(d, "info")};width:30px;height:30px"><ha-icon icon="${esc(pointIcon(d))}"></ha-icon></span>
+            <input type="text" id="f_icon" data-f="icon" value="${esc(d.icon || "")}" list="dl-icons" placeholder="${esc(TYPES[d.type]?.icon || "")}" autocomplete="off" style="max-width:190px"></span></div>
+          <datalist id="dl-icons">${["mdi:water-pump", "mdi:pump", "mdi:water-well", "mdi:water", "mdi:water-outline", "mdi:waves", "mdi:sprinkler-variant", "mdi:sprinkler", "mdi:pipe-valve",
+            "mdi:transmission-tower", "mdi:flash-triangle", "mdi:flash", "mdi:meter-electric", "mdi:solar-power-variant", "mdi:engine", "mdi:fuel", "mdi:home-outline", "mdi:barn", "mdi:silo",
+            "mdi:warehouse", "mdi:tractor", "mdi:cow", "mdi:sheep", "mdi:fruit-grapes", "mdi:tree", "mdi:gate", "mdi:boom-gate", "mdi:cctv", "mdi:wifi", "mdi:router-wireless", "mdi:thermometer",
+            "mdi:weather-partly-rainy", "mdi:fence", "mdi:fire-extinguisher", "mdi:alert", "mdi:map-marker", "mdi:star", "mdi:flag"].map((i) => `<option value="${i}"></option>`).join("")}</datalist>
+          ${this._snap.points.filter((x) => x.type === d.type && x.id !== d.id).length ? `<div class="actions" style="margin:2px 0 6px"><button class="btn" data-act="colorall" style="padding:4px 12px">Use this colour and icon for all ${esc((TYPES[d.type]?.label || "").toLowerCase())}s</button></div>` : ""}
           <div class="field"><label for="f_gps">GPS position</label><span class="hint">Type or paste: -25.861234, 28.103456 · 25°51'40"S 28°06'12"E · a Google Maps link – or drag the point on the map</span>
             <div class="ent"><input type="text" id="f_gps" value="${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}" autocomplete="off" spellcheck="false" inputmode="text">
             <button class="btn" data-act="gpsset" style="padding:6px 12px">Move</button></div><div class="err" id="gpserr"></div></div>
@@ -1528,7 +1551,7 @@ class HamletFarmPanel extends HTMLElement {
     const why = (m, fallback) => (m.why ? `${esc(m.why[0])}${m.why[0] ? ": " : ""}${hl(m.why[1])}` : esc(fallback || ""));
     for (const m of r.points.slice(0, 8)) {
       const cls = m.st.cls || "info";
-      add("Points", `<span class="si" style="--mc:${clsColor(cls, m.p.type)}${cls === "info" ? ";color:#333;border:1px solid var(--line)" : ""}"><ha-icon icon="${ICON(m.p.type)}"></ha-icon></span>
+      add("Points", `<span class="si" style="${m.p.color ? dotStyle(m.p, cls) : `--mc:${clsColor(cls, m.p.type)}${cls === "info" ? ";color:#333;border:1px solid var(--line)" : ""}`}"><ha-icon icon="${esc(pointIcon(m.p))}"></ha-icon></span>
         <span class="st"><div>${hl(m.p.name)}</div><div class="ss">${why(m, `${TYPES[m.p.type]?.label || ""}${m.st.status ? " · " + m.st.status : ""}`)}</div></span>`, { kind: "point", id: m.p.id });
     }
     for (const m of r.shapes.slice(0, 5)) {
@@ -1638,6 +1661,8 @@ class HamletFarmPanel extends HTMLElement {
     if (el?.dataset?.layer && ev.type === "change") {
       this._layers[el.dataset.layer] = el.checked; this._saveLayers(); this._renderLayers(); return;
     }
+    if (el?.id === "f_pcolor" && ev.type === "change" && this._draft) { this._readForm(); this._draft.color = el.value.toLowerCase(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return; }
+    if (el?.id === "f_icon" && ev.type === "change" && this._draft) { this._readForm(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return; }
     if (el?.id === "f_gps" && ev.type === "change") { const g = parseGPS(el.value); if (g) this._gpsMove(g); else this.$("gpserr").textContent = "Couldn't read that – e.g. -25.861234, 28.103456"; return; }
     if (el?.id === "drawkind" && this._draw) { this._draw.kind = el.value; this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
@@ -1652,7 +1677,7 @@ class HamletFarmPanel extends HTMLElement {
   async _click(ev) {
     const path = ev.composedPath();
     const KEYS = ["act", "tab", "pt", "filter", "base", "ctl", "pmode", "type", "skind", "toggle", "offarea", "offshow", "offvis", "offdel",
-      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange", "nfile", "svc", "svdel", "svquick", "svnext"];
+      "pen", "scolor", "more", "notedel", "photo", "doc", "copy", "ptab", "hrange", "nfile", "svc", "svdel", "svquick", "svnext", "pcolor"];
     const t = path.find((e) => e instanceof HTMLElement && KEYS.some((k) => e.dataset?.[k] !== undefined && e.dataset[k] !== ""));
     if (!t) return;
     const ds = t.dataset;
@@ -1675,6 +1700,10 @@ class HamletFarmPanel extends HTMLElement {
     }
     if (ds.hrange && this._page) { this._histState.range = ds.hrange; this._renderHist(); return; }
     if (ds.nfile) { this._viewFile(`/api/${DOMAIN}/file/${this._entryId}/${encodeURIComponent(ds.nfile)}`, ds.fname); return; }
+    if (ds.pcolor && this._draft?.kind === "point") {
+      this._readForm(); this._draft.color = ds.pcolor === "auto" ? "" : ds.pcolor;
+      this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return;
+    }
     if (ds.svc) { this._docModal = { svcView: ds.svc }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); return; }
     if (ds.svdel !== undefined && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.items.splice(Number(ds.svdel), 1); this._renderDocModal(); return; }
     if (ds.svquick && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.items.push({ desc: ds.svquick, qty: 1, price: "" }); this._renderDocModal(); return; }
@@ -1756,6 +1785,15 @@ class HamletFarmPanel extends HTMLElement {
         if (this._pen.plan && !this._layers.planning) { this._layers.planning = true; this._saveLayers(); this._toast("Planning lines are shown – switch them off under Layers"); }
         this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "colorall": {
+        this._readForm(); const d = this._draft;
+        const same = this._snap.points.filter((x) => x.type === d.type && x.id !== d.id);
+        try {
+          for (const x of same) await this._hass.callWS({ type: `${DOMAIN}/save_point`, entry_id: this._entryId, point: { ...x, color: d.color || "", icon: d.icon || "" } });
+          this._toast(`${same.length} other ${(TYPES[d.type]?.label || "point").toLowerCase()}${same.length === 1 ? "" : "s"} changed – Save this one too`);
+        } catch (e) { this._toast(e.message); }
+        break;
+      }
       case "svcnew": case "svcedit": case "svccopy": {
         await this._docUsers();
         const base = ds.act === "svcnew" ? null : this._services.find((r) => r.id === this._docModal?.svcView);

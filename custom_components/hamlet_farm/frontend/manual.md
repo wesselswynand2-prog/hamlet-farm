@@ -123,6 +123,8 @@ height: 400
 
 **Pivot:** set the **radius** (centre to the last tower) so the circle is drawn to size. **Tank:** set **Low level alert below**.
 
+**Colour and icon:** under the name, pick a **colour** for the point (**A** = automatic status colours, or the colour picker for any colour) and an **icon** (start typing, e.g. `mdi:barn`, `mdi:water-well`, `mdi:tractor` – any icon from materialdesignicons.com). The map shows it straight away. **Use this colour and icon for all …** copies it to every point of the same type. Running (green), attention (orange), fault (red) and offline (grey) still show their status colour, so a problem is never hidden.
+
 ## Installation details and service reports {admin} {icon:mdi:clipboard-text-outline}
 
 **Installation details** – Edit → tap the pump / pivot → **Installation details**: installed on, borehole depth, pump installed at, static water level, yield, motor size (kW), motor and pump make / model, starter (DOL, star-delta, soft starter, VFD, pump controller, pressure / float switch), cable, delivery pipe, serial number, installed by. Pivots: make / model, towers, motor, starter, end gun. They show on the point's page and on every service report.

@@ -115,6 +115,8 @@ def clean_point(raw: dict) -> dict:
         "alert": bool(raw.get("alert", True)),
         "notes": _txt(raw.get("notes"), 500),
         "specs": _specs(raw.get("specs"), ptype),
+        "color": c if re.match(r"^#[0-9a-f]{6}$", c := str(raw.get("color") or "").strip().lower()) else "",
+        "icon": i if re.match(r"^mdi:[a-z0-9-]{1,60}$", i := str(raw.get("icon") or "").strip().lower()) else "",
         # dashboard cards shown on the point's page, as Lovelace YAML (e.g. the panel meter card)
         "cards": str(raw.get("cards") or "")[:10000],
     }

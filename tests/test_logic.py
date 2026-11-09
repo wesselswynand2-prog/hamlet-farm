@@ -155,3 +155,10 @@ def test_manual_md_up_to_date():
 
 def test_shape_notes():
     assert logic.clean_shape({"kind": "pipe", "notes": "110 mm HDPE, 1 m deep", "coords": [[1, 2], [3, 4]]})["notes"] == "110 mm HDPE, 1 m deep"
+
+
+def test_point_colour_and_icon():
+    p = pt(color="#E53935", icon="mdi:water-well")
+    assert p["color"] == "#e53935" and p["icon"] == "mdi:water-well"
+    p = pt(color="red; background:url(x)", icon="javascript:alert(1)")
+    assert p["color"] == "" and p["icon"] == ""
