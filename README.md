@@ -121,7 +121,7 @@ A point with *Alert when this point has a problem* on (default) alerts when it i
 
 ## Map pictures
 
-Satellite and Hybrid use Esri World Imagery (free, no key); Map uses OpenStreetMap. Those pictures come from the internet. For farms with poor or no internet, save an **offline farm photo** on Home Assistant (below).
+Satellite and Hybrid use Esri World Imagery and Map uses the Esri World Street Map (free, no key). Those pictures come from the internet. For farms with poor or no internet, save an **offline farm photo** on Home Assistant (below).
 
 ## Offline farm photo (no internet needed)
 

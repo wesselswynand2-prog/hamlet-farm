@@ -191,7 +191,8 @@ export class FarmMap {
     const satAttr = "Imagery © Esri, Maxar, Earthstar Geographics";
     let layers;
     if (kind === "map") {
-      layers = [L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 21, attribution: "© OpenStreetMap contributors" })];
+      // Esri street map: OpenStreetMap's own servers block Home Assistant (no Referer header is sent) – "403 Access blocked"
+      layers = [L.tileLayer(esri("World_Street_Map"), { maxNativeZoom: 18, maxZoom: 21, attribution: "Map © Esri, HERE, Garmin, OpenStreetMap contributors" })];
     } else {
       layers = [L.tileLayer(esri("World_Imagery"), { maxNativeZoom: 19, maxZoom: 21, attribution: satAttr })];
       if (kind === "hybrid") {
