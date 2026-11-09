@@ -437,6 +437,16 @@ class HamletFarmPanel extends HTMLElement {
     this._renderBanner();
   }
 
+  /** Colour / icon are saved straight away on a point that already exists (no need to tap Save). */
+  async _saveLook() {
+    const d = this._draft; const p = d && this._point(d.id);
+    if (!p) return;
+    try {
+      await this._ws("save_point", { point: { ...p, color: d.color || "", icon: d.icon || "" } });
+      this._toast(d.color || d.icon ? "Colour / icon saved" : "Back to automatic colours");
+    } catch (e) { this._toast(e.message); }
+  }
+
   /** Snapshot for the map with the point being edited shown as it is now (colour / icon preview). */
   _mapPreview() {
     const s = this._mapSnap(); const d = this._draft;
@@ -1661,8 +1671,8 @@ class HamletFarmPanel extends HTMLElement {
     if (el?.dataset?.layer && ev.type === "change") {
       this._layers[el.dataset.layer] = el.checked; this._saveLayers(); this._renderLayers(); return;
     }
-    if (el?.id === "f_pcolor" && ev.type === "change" && this._draft) { this._readForm(); this._draft.color = el.value.toLowerCase(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return; }
-    if (el?.id === "f_icon" && ev.type === "change" && this._draft) { this._readForm(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return; }
+    if (el?.id === "f_pcolor" && ev.type === "change" && this._draft) { this._readForm(); this._draft.color = el.value.toLowerCase(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); this._saveLook(); return; }
+    if (el?.id === "f_icon" && ev.type === "change" && this._draft) { this._readForm(); this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); this._saveLook(); return; }
     if (el?.id === "f_gps" && ev.type === "change") { const g = parseGPS(el.value); if (g) this._gpsMove(g); else this.$("gpserr").textContent = "Couldn't read that – e.g. -25.861234, 28.103456"; return; }
     if (el?.id === "drawkind" && this._draw) { this._draw.kind = el.value; this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (el?.id === "offop") { this._off.opacity = Number(el.value); this._fm.setAlignOpacity(this._off.opacity); return; }
@@ -1702,7 +1712,7 @@ class HamletFarmPanel extends HTMLElement {
     if (ds.nfile) { this._viewFile(`/api/${DOMAIN}/file/${this._entryId}/${encodeURIComponent(ds.nfile)}`, ds.fname); return; }
     if (ds.pcolor && this._draft?.kind === "point") {
       this._readForm(); this._draft.color = ds.pcolor === "auto" ? "" : ds.pcolor;
-      this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); return;
+      this._fm.update(this._mapPreview()); this._setHTML(this.$("side"), ""); this._renderSide(); this._saveLook(); return;
     }
     if (ds.svc) { this._docModal = { svcView: ds.svc }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); return; }
     if (ds.svdel !== undefined && this._docModal?.svcForm) { this._readSvcForm(); this._docModal.svcForm.items.splice(Number(ds.svdel), 1); this._renderDocModal(); return; }
@@ -1787,10 +1797,10 @@ class HamletFarmPanel extends HTMLElement {
       case "pageback": this._closePage(); break;
       case "colorall": {
         this._readForm(); const d = this._draft;
-        const same = this._snap.points.filter((x) => x.type === d.type && x.id !== d.id);
+        const same = this._snap.points.filter((x) => x.type === d.type);
         try {
-          for (const x of same) await this._hass.callWS({ type: `${DOMAIN}/save_point`, entry_id: this._entryId, point: { ...x, color: d.color || "", icon: d.icon || "" } });
-          this._toast(`${same.length} other ${(TYPES[d.type]?.label || "point").toLowerCase()}${same.length === 1 ? "" : "s"} changed – Save this one too`);
+          for (const x of same) await this._ws("save_point", { point: { ...x, color: d.color || "", icon: d.icon || "" } });
+          this._toast(`Colour and icon saved on all ${same.length} ${(TYPES[d.type]?.label || "point").toLowerCase()}${same.length === 1 ? "" : "s"}`);
         } catch (e) { this._toast(e.message); }
         break;
       }
