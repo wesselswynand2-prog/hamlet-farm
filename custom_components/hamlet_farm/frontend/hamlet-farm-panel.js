@@ -965,16 +965,42 @@ class HamletFarmPanel extends HTMLElement {
       // custom cards are normally loaded by dashboards; load their resources here too
       const missing = configs.map((c) => String(c.type || "")).filter((t) => t.startsWith("custom:") && !customElements.get(t.slice(7)));
       if (missing.length) await this._loadResources(missing.map((t) => t.slice(7)));
-      const helpers = await window.loadCardHelpers();
+      const helpers = await this._cardHelpers();
       if (this._page !== page) return;
       box.replaceChildren();
       for (const conf of configs) {
-        const el = helpers.createCardElement(conf);
+        const el = this._makeCard(helpers, conf);
         el.hass = this._hass;
         box.appendChild(el);
         this._pageCards.push(el);
       }
     } catch (e) { box.innerHTML = `<section class="card"><div class="err">Could not show the card: ${esc(e.message)}</div></section>`; }
+  }
+
+  /** HA only provides loadCardHelpers once a dashboard has been opened – load the dashboard code if needed. */
+  async _cardHelpers() {
+    if (typeof window.loadCardHelpers !== "function") {
+      try {
+        await Promise.race([customElements.whenDefined("partial-panel-resolver"), new Promise((r) => setTimeout(r, 3000))]);
+        const ppr = document.createElement("partial-panel-resolver");
+        ppr.hass = { panels: [{ url_path: "tmp", component_name: "lovelace" }] };
+        ppr._updateRoutes();
+        await ppr.routerOptions.routes.tmp.load();
+        await Promise.race([customElements.whenDefined("hui-view"), new Promise((r) => setTimeout(r, 3000))]);
+      } catch (e) { /* fall back below */ }
+    }
+    if (typeof window.loadCardHelpers === "function") { try { return await window.loadCardHelpers(); } catch (e) { /* fall back */ } }
+    return null;
+  }
+
+  _makeCard(helpers, conf) {
+    if (helpers) return helpers.createCardElement(conf);
+    const type = String(conf.type || "");
+    const tag = type.startsWith("custom:") ? type.slice(7) : `hui-${type}-card`;
+    if (!customElements.get(tag)) throw new Error(`card "${type}" is not loaded – open any dashboard once, then come back`);
+    const el = document.createElement(tag);
+    el.setConfig(conf);
+    return el;
   }
 
   async _loadResources(tags) {
