@@ -162,3 +162,13 @@ def test_point_colour_and_icon():
     assert p["color"] == "#e53935" and p["icon"] == "mdi:water-well"
     p = pt(color="red; background:url(x)", icon="javascript:alert(1)")
     assert p["color"] == "" and p["icon"] == ""
+
+
+def test_sticky_note():
+    s = logic.clean_shape({"kind": "sticky", "coords": [[-25.1, 28.2], [-25.2, 28.3]], "notes": "New borehole here?", "color": "#A5D6A7", "hidden": True})
+    assert s["coords"] == [[-25.1, 28.2]] and s["color"] == "#a5d6a7" and s["hidden"] and s["notes"] == "New borehole here?"
+    assert logic.clean_shape({"kind": "sticky", "coords": [[-25.1, 28.2]], "name": "Ask Piet", "color": "red"})["color"] == "#fff176"
+    with pytest.raises(ValueError):
+        logic.clean_shape({"kind": "sticky", "coords": [[-25.1, 28.2]]})
+    with pytest.raises(ValueError):
+        logic.clean_shape({"kind": "sticky", "coords": [], "notes": "x"})

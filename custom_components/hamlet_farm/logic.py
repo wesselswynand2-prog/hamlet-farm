@@ -27,8 +27,9 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
 }
 SHAPE_KINDS = {"pipe": "Water pipe", "power": "Overhead power line", "cable": "Cable 1 000 V", "cable3300": "Cable 3 300 V",
                "mv": "MV cable", "fence": "Fence", "road": "Road", "field": "Land / camp",
-               "sketch": "Drawing"}
+               "sketch": "Drawing", "sticky": "Sticky note"}
 SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000")
+STICKY_COLORS = ("#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8", "#ffffff")
 
 # entity roles a point can have
 ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle"]
@@ -163,25 +164,30 @@ def clean_shape(raw: dict) -> dict:
         if lat is None or lng is None:
             raise ValueError("bad coordinate")
         coords.append([round(lat, 7), round(lng, 7)])
-    need = 3 if kind == "field" else 2
+    need = 3 if kind == "field" else 1 if kind == "sticky" else 2
     if len(coords) < need:
         raise ValueError(f"a {SHAPE_KINDS[kind].lower()} needs at least {need} points")
     pid = _txt(raw.get("id"), 16)
     if not re.match(r"^[A-Za-z0-9_-]+$", pid):
         pid = new_id()
     shape = {"id": pid, "kind": kind, "name": _txt(raw.get("name"), 60) or SHAPE_KINDS[kind],
-             "coords": coords[:2000 if kind == "sketch" else 500]}
+             "coords": coords[:1] if kind == "sticky" else coords[:2000 if kind == "sketch" else 500]}
     if info := _txt(raw.get("info"), 120):
         shape["info"] = info
     if notes := _txt(raw.get("notes"), 1000):
         shape["notes"] = notes
     if raw.get("hidden"):
         shape["hidden"] = True     # planning / demo line: only admins see it, when they switch planning lines on
-    if raw.get("show_len") and kind != "field":
+    if raw.get("show_len") and kind not in ("field", "sticky"):
         shape["show_len"] = True   # length written on the map next to the line
     if kind == "sketch":
         color = str(raw.get("color") or "").lower()
         shape["color"] = color if color in SKETCH_COLORS else SKETCH_COLORS[0]
+    if kind == "sticky":
+        color = str(raw.get("color") or "").lower()
+        shape["color"] = color if color in STICKY_COLORS else STICKY_COLORS[0]
+        if not shape.get("notes") and shape["name"] == SHAPE_KINDS["sticky"]:
+            raise ValueError("write something on the sticky note")
     return shape
 
 

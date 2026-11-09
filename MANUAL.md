@@ -153,9 +153,16 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 ## Drawing, planning lines and deleting (admin)
 
 - **Edit → Draw:** drag a finger or the mouse on the map. Pick a colour in the bar. **Length** writes each line's length next to it. **Undo** takes back the last stroke.
-- **Planning** in the Draw bar (or *Planning / demo only* in a line's settings) hides the drawing from the map. Admins show planning lines with **Layers → Planning lines**; clients never see them.
+- **Planning** in the Draw bar (or *Planning / demo only* in a line's settings) hides the drawing from the map. Admins show planning lines with **Layers → Planning lines & notes**; clients never see them.
 - **Delete one drawing or line:** Edit → tap it → **Delete** (twice).
 - **Delete all drawings:** **Layers → Delete all drawings** (twice). Pipes, cables and other lines stay.
+
+## Sticky notes (admin)
+
+- **Edit → Sticky note**, then tap the map where it goes. Write the note, pick a colour and tap **Save**.
+- New notes are **Planning only** – clients never see them, and they show when an admin switches on **Layers → Planning lines & notes**. Switch *Planning only* off to show a note to everyone (also on the dashboard card).
+- **Move:** in Edit, drag the note. **Change or delete:** in Edit, tap the note.
+- Outside Edit, tap a note to read all of it. **Layers → Sticky notes** hides all notes; search finds notes by their text.
 
 ## Transformers and Eskom points (admin)
 

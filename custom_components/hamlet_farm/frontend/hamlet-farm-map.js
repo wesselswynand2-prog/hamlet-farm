@@ -40,8 +40,10 @@ export const SHAPES = {
   road: { label: "Road", color: "#e0cfa6", weight: 4, dash: null },
   field: { label: "Land / camp", color: "#8fd16a", weight: 2, dash: null },
   sketch: { label: "Drawing", color: "#ff3b30", weight: 4, dash: null },
+  sticky: { label: "Sticky note", color: "#fff176", weight: 0, dash: null },
 };
 export const SKETCH_COLORS = ["#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000"];
+export const STICKY_COLORS = ["#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8", "#ffffff"];
 
 /** Length of a line in metres and area of a closed shape in m² (good enough over a farm). */
 export function lineLength(coords) {
@@ -147,6 +149,14 @@ export const MAP_CSS = `
 .leaflet-pane.leaflet-offline-pane img { image-rendering: auto; }
 .hf-measure-lbl { background: rgba(20,24,28,.85); color: #fff; border: 0; border-radius: 6px; padding: 2px 6px; font-size: 12px; font-weight: 500; box-shadow: none; }
 .hf-measure-lbl::before { display: none; }
+.hf-sticky-wrap { background: none; border: 0; }
+.hf-sticky { position: absolute; left: -6px; top: -6px; width: max-content; max-width: 170px; min-width: 60px; padding: 7px 9px 8px; border-radius: 2px 2px 10px 2px;
+  color: #222; font: 12px/1.3 system-ui, sans-serif; box-shadow: 1px 3px 8px rgba(0,0,0,.45); transform: rotate(-2deg); cursor: pointer; white-space: pre-wrap; word-break: break-word; }
+.hf-sticky::before { content: ""; position: absolute; left: 1px; top: 1px; width: 10px; height: 10px; border-radius: 50%; background: #d32f2f; box-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.hf-sticky b { display: block; font-size: 12.5px; margin: 0 0 2px 6px; }
+.hf-sticky span { display: block; max-height: 9.2em; overflow: hidden; }
+.hf-sticky.plan { opacity: .82; outline: 2px dashed rgba(0,0,0,.45); outline-offset: -3px; }
+.hf-sticky.plan::after { content: "planning"; position: absolute; right: 4px; bottom: -15px; font-size: 10px; color: #fff; text-shadow: 0 0 3px #000; }
 .hf-field-lbl small { font-weight: 400; }
 .hf-vertex { width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #2a78d6; }
 `;
@@ -161,9 +171,9 @@ function destination(lat, lng, bearingDeg, metres) {
 
 /** Thin wrapper around a Leaflet map that draws farm points, pivots and lines from a hamlet_farm snapshot. */
 export class FarmMap {
-  constructor(L, container, { onSelect, onMove, onMapClick, onShapeClick, interactive = true } = {}) {
+  constructor(L, container, { onSelect, onMove, onMapClick, onShapeClick, onShapeMove, interactive = true } = {}) {
     this.L = L;
-    this.cb = { onSelect, onMove, onMapClick, onShapeClick };
+    this.cb = { onSelect, onMove, onMapClick, onShapeClick, onShapeMove };
     this.map = L.map(container, { zoomControl: interactive, attributionControl: true, maxZoom: 21, tap: true, scrollWheelZoom: interactive, worldCopyJump: true });
     this.container = container;
     this.markers = new Map(); this.pivots = new Map(); this.shapes = new Map();
@@ -228,7 +238,7 @@ export class FarmMap {
 
   setEditing(on) {
     this.editing = on;
-    for (const m of this.markers.values()) { if (on) m.dragging?.enable(); else m.dragging?.disable(); }
+    for (const m of [...this.markers.values(), ...[...this.shapes.values()].filter((x) => x._sticky)]) { if (on) m.dragging?.enable(); else m.dragging?.disable(); }
     this.container.style.cursor = on ? "crosshair" : "";
   }
 
@@ -314,10 +324,11 @@ export class FarmMap {
     for (const s of shapes) {
       if (this.shapeFilter && !this.shapeFilter(s)) continue;
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len, s.hidden]);
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len, s.hidden, s.kind === "sticky" ? s.notes : ""]);
       const old = this.shapes.get(s.id);
       if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
+      if (s.kind === "sticky") { this._sticky(s, key); continue; }
       const d = SHAPES[s.kind] || SHAPES.pipe;
       const color = s.kind === "sketch" && s.color ? s.color : d.color;
       const opts = { color, weight: d.weight, dashArray: d.dash, opacity: s.hidden ? 0.6 : 0.95, lineCap: "round", lineJoin: "round" };
@@ -352,6 +363,22 @@ export class FarmMap {
       this.shapes.set(s.id, layer);
     }
     for (const [id, l] of this.shapes) if (!seen.has(id)) { this.shapeLayer.removeLayer(l); this.shapes.delete(id); }
+  }
+
+  /** A sticky note pinned on the map (top-left corner on its spot). Dragged to move while editing. */
+  _sticky(s, key) {
+    const L = this.L;
+    const title = s.name && s.name !== "Sticky note" ? s.name : "";
+    const txt = (s.notes || "").length > 220 ? `${s.notes.slice(0, 220)}…` : s.notes || "";
+    const html = `<div class="hf-sticky${s.hidden ? " plan" : ""}" style="background:${esc(s.color || STICKY_COLORS[0])}">${title ? `<b>${esc(title)}</b>` : ""}${txt ? `<span>${esc(txt)}</span>` : ""}</div>`;
+    const m = L.marker(s.coords[0], { icon: L.divIcon({ className: "hf-sticky-wrap", html, iconSize: [0, 0] }), draggable: true, keyboard: true, title: title || txt.slice(0, 60), zIndexOffset: 500 });
+    if (!this.editing) m.dragging?.disable();
+    m.on("add", () => { if (!this.editing) m.dragging?.disable(); });
+    m.on("click", (e) => this._shapeHit(e, s.id));
+    m.on("dragend", () => { const ll = m.getLatLng(); this.cb.onShapeMove && this.cb.onShapeMove(s.id, ll.lat, ll.lng); });
+    m._key = key + (s.color || ""); m._sticky = true;
+    m.addTo(this.shapeLayer);
+    this.shapes.set(s.id, m);
   }
 
   /** Offline farm photos stored on Home Assistant. */

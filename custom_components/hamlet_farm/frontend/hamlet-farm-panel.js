@@ -2,7 +2,7 @@
 import { HELP_CSS, renderHelp } from "./hamlet-farm-help.js";
 import { HISTORY_CSS, renderHistory } from "./hamlet-farm-history.js";
 import { SERVICE_CSS, installFieldsHtml, installRows, hasService, serviceTabHtml, serviceViewHtml, serviceFormHtml, printReport, dueText, updateServiceTotals } from "./hamlet-farm-service.js";
-import { TYPES, ROLES, SHAPES, SKETCH_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS, POINT_COLORS, pointColor, pointIcon, inkOn } from "./hamlet-farm-map.js";
+import { TYPES, ROLES, SHAPES, SKETCH_COLORS, STICKY_COLORS, MAP_CSS, FarmMap, loadLeaflet, clsColor, esc, num, fmtW, shortValue, lineLength, areaM2, fmtDist, fmtArea, parseGPS, POINT_COLORS, pointColor, pointIcon, inkOn } from "./hamlet-farm-map.js";
 
 const fmtMB = (b) => { b = num(b) || 0; return b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB`; };
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`);
@@ -377,9 +377,10 @@ class HamletFarmPanel extends HTMLElement {
       onMove: (id, lat, lng) => this._move(id, lat, lng),
       onMapClick: (ll) => this._mapClick(ll),
       onShapeClick: (id) => this._shapeClick(id),
+      onShapeMove: (id, lat, lng) => this._moveShape(id, lat, lng),
     });
     let saved = null;
-    this._layers = { labels: true, sketch: true, pipe: true, cables: true, power: true, fence: true, road: true, field: true, photo: true, planning: false };
+    this._layers = { labels: true, sticky: true, sketch: true, pipe: true, cables: true, power: true, fence: true, road: true, field: true, photo: true, planning: false };
     try {
       saved = localStorage.getItem("hamlet_farm_entry"); this._labels = localStorage.getItem("hamlet_farm_labels") !== "0"; this._baseOverride = localStorage.getItem("hamlet_farm_base");
       Object.assign(this._layers, JSON.parse(localStorage.getItem("hamlet_farm_layers") || "{}"));
@@ -482,6 +483,7 @@ class HamletFarmPanel extends HTMLElement {
     const planning = shapes.filter((x) => x.hidden);
     box.innerHTML = `<b>Show on the map</b>
       ${row("labels", "Names under points")}
+      ${row("sticky", "Sticky notes", sw("#fff176"), n((x) => x.kind === "sticky" && !x.hidden))}
       ${row("sketch", "Drawings", sw("#ff3b30"), n((x) => x.kind === "sketch" && !x.hidden))}
       ${row("pipe", "Water pipes", sw("#5aaeff"), n((x) => x.kind === "pipe"))}
       ${row("cables", "Cables (1 000 V / 3 300 V / MV)", sw("#ff6a00", true), n((x) => ["cable", "cable3300", "mv"].includes(x.kind)))}
@@ -490,7 +492,7 @@ class HamletFarmPanel extends HTMLElement {
       ${row("road", "Roads", sw("#e0cfa6"), n((x) => x.kind === "road"))}
       ${row("field", "Land / camps", sw("#8fd16a"), n((x) => x.kind === "field"))}
       ${(this._snap?.offline || []).length ? row("photo", "Offline farm photo") : ""}
-      ${this._isAdmin ? `<div class="sep"></div>${row("planning", "Planning lines (hidden)", sw("#ffffff", true), planning.length)}
+      ${this._isAdmin ? `<div class="sep"></div>${row("planning", "Planning lines & notes (hidden)", sw("#ffffff", true), planning.length)}
         <div style="font-size:12px;opacity:.7">Only admins can show these. Clients never see them.</div>
         ${drawings.length ? `<button class="btn" data-act="deldrawings" style="${this._confirm === "deldrawings" ? "background:#db4437;border-color:#db4437" : ""}"><ha-icon icon="mdi:delete-sweep-outline"></ha-icon>${this._confirm === "deldrawings" ? "Tap again – delete all drawings" : `Delete all drawings (${drawings.length})`}</button>` : ""}` : ""}`;
   }
@@ -539,10 +541,13 @@ class HamletFarmPanel extends HTMLElement {
       const d = SHAPES[this._draw.kind];
       const n = this._draw.coords.length; const need = this._draw.kind === "field" ? 3 : 2;
       html = `<div class="banner"><ha-icon icon="mdi:vector-polyline"></ha-icon><span>Drawing</span>
-        <select id="drawkind" class="kindsel" aria-label="What are you drawing" style="border-left:6px solid ${d.color}">${Object.entries(SHAPES).filter(([k]) => k !== "sketch").map(([k, v]) => `<option value="${k}" ${k === this._draw.kind ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+        <select id="drawkind" class="kindsel" aria-label="What are you drawing" style="border-left:6px solid ${d.color}">${Object.entries(SHAPES).filter(([k]) => k !== "sketch" && k !== "sticky").map(([k, v]) => `<option value="${k}" ${k === this._draw.kind ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
         <span>– tap the map to add points</span>${n > 1 ? `<span class="big">${this._draw.kind === "field" && n > 2 ? fmtArea(areaM2(this._draw.coords)) : fmtDist(lineLength(this._draw.coords))}</span>` : ""}
         <button class="btn" data-act="drawundo" ${n ? "" : "disabled"}>Undo</button><button class="btn" data-act="drawcancel">Cancel</button>
         <button class="btn primary" data-act="drawdone" ${n >= need ? "" : "disabled"}>Finish</button></div>`;
+    } else if (this._placingNote) {
+      html = `<div class="banner"><ha-icon icon="mdi:note-text-outline"></ha-icon><span>Tap the map where the sticky note goes</span>
+        <button class="btn" data-act="notecancel">Cancel</button></div>`;
     } else if (this._placing) {
       html = `<div class="banner"><ha-icon icon="mdi:map-marker-plus"></ha-icon><span>Tap the map where the new point goes, or type its GPS:</span>
         <form id="gpsform" style="display:flex;gap:6px;flex:1;min-width:220px"><input type="text" id="gpsin" placeholder="-25.861234, 28.103456" autocomplete="off" spellcheck="false"
@@ -553,13 +558,14 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn primary" data-act="addpoint"><ha-icon icon="mdi:map-marker-plus"></ha-icon>Point</button>
         <button class="btn" data-act="addline"><ha-icon icon="mdi:vector-polyline"></ha-icon>Line / land</button>
         <button class="btn" data-act="pen"><ha-icon icon="mdi:draw"></ha-icon>Draw</button>
+        <button class="btn" data-act="addnote"><ha-icon icon="mdi:note-text-outline"></ha-icon>Sticky note</button>
         <button class="btn" data-act="saveview" title="Open the map here next time"><ha-icon icon="mdi:crop-free"></ha-icon>Start view</button>
         <button class="btn" data-act="helpat" data-topic="Setting up" aria-label="Help">?</button>
         <button class="btn" data-act="edit">Done</button></div>`;
     }
     this._setHTML(this.$("banner"), html);
     this._fm?.setEditing(this._edit);
-    if (this._fm) this._fm.passThrough = !!(this._measure || this._placing || this._draw || this._pen);
+    if (this._fm) this._fm.passThrough = !!(this._measure || this._placing || this._placingNote || this._draw || this._pen);
   }
 
   /* ------------------------------------------------------------ side panel */
@@ -882,6 +888,17 @@ class HamletFarmPanel extends HTMLElement {
     const d = SHAPES[sh.kind] || SHAPES.pipe;
     const color = sh.kind === "sketch" && sh.color ? sh.color : d.color;
     const closed = sh.kind === "field";
+    if (sh.kind === "sticky") {
+      this._setHTML(this.$("pg-head"), `
+        <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
+        <span class="dot" style="--mc:${esc(sh.color || STICKY_COLORS[0])};border:1px solid var(--line)"><ha-icon icon="mdi:note-text-outline" style="color:#333"></ha-icon></span>
+        <div class="t"><b>${esc(sh.name)}</b><span>Sticky note${sh.hidden ? " · planning" : ""}</span></div>
+        ${this._isAdmin ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+      this._setHTML(this.$("pg-now"), `<div style="background:${esc(sh.color || STICKY_COLORS[0])};color:#222;border-radius:4px 4px 14px 4px;padding:14px 16px;white-space:pre-wrap;font-size:15px;box-shadow:1px 3px 8px rgba(0,0,0,.25)">${esc(sh.notes || "")}</div>
+        <div class="kv" style="margin-top:10px"><span class="muted">GPS</span><span>${sh.coords[0][0].toFixed(6)}, ${sh.coords[0][1].toFixed(6)}</span></div>`);
+      this._setHTML(this.$("pg-info"), ""); this.$("pg-info").hidden = true;
+      return;
+    }
     this._setHTML(this.$("pg-head"), `
       <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
       <span class="dot" style="--mc:${color};border:1px solid var(--line)"><ha-icon icon="${closed ? "mdi:vector-square" : sh.kind === "sketch" ? "mdi:draw" : "mdi:vector-polyline"}" style="color:${color === "#ffffff" || color === "#ffcc00" ? "#333" : "#fff"}"></ha-icon></span>
@@ -1393,10 +1410,11 @@ class HamletFarmPanel extends HTMLElement {
 
   _renderShapeEditor() {
     const d = this._draft; const isNew = !this._snap.shapes.some((s) => s.id === d.id);
+    if (d.shape_kind === "sticky") return this._renderStickyEditor(isNew);
     this._setHTML(this.$("side"), `
       <section class="card" id="editor">
         <h2>${isNew ? "New line" : "Edit line"}<span class="sub"><button class="iconbtn" data-act="helpat" data-topic="Lines" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
-        <div class="chips">${Object.entries(SHAPES).map(([k, s]) => `<button class="chip" data-skind="${k}" aria-pressed="${d.shape_kind === k}"><i style="width:14px;height:4px;border-radius:2px;background:${s.color};display:inline-block;outline:1px solid rgba(0,0,0,.3)"></i>${s.label}</button>`).join("")}</div>
+        <div class="chips">${Object.entries(SHAPES).filter(([k]) => k !== "sticky").map(([k, s]) => `<button class="chip" data-skind="${k}" aria-pressed="${d.shape_kind === k}"><i style="width:14px;height:4px;border-radius:2px;background:${s.color};display:inline-block;outline:1px solid rgba(0,0,0,.3)"></i>${s.label}</button>`).join("")}</div>
         ${d.shape_kind === "sketch" ? `<div class="chips" style="margin-top:8px">${SKETCH_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || SKETCH_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>` : ""}
         <div class="form" style="margin-top:8px">
           <div class="field"><label for="f_sname">Name</label><input type="text" id="f_sname" data-f="name" value="${esc(d.name)}" maxlength="60" placeholder="${esc(SHAPES[d.shape_kind].label)}"></div>
@@ -1408,6 +1426,27 @@ class HamletFarmPanel extends HTMLElement {
         </div>
         <div class="actions">
           ${isNew ? "" : `<button class="btn" data-act="openlog" style="width:100%;justify-content:center;margin-bottom:4px"><ha-icon icon="mdi:paperclip"></ha-icon>Notes, photos &amp; files (site log)</button>`}
+          <button class="btn primary" data-act="saveshape">Save</button>
+          <button class="btn" data-act="canceledit">Cancel</button>
+          ${isNew ? "" : `<button class="btn danger" data-act="deleteshape" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
+        </div>
+        <div class="err" id="ferr"></div>
+      </section>`);
+  }
+
+  _renderStickyEditor(isNew) {
+    const d = this._draft;
+    this._setHTML(this.$("side"), `
+      <section class="card" id="editor">
+        <h2>${isNew ? "New sticky note" : "Sticky note"}<span class="sub"><button class="iconbtn" data-act="helpat" data-topic="Sticky notes" title="Help" aria-label="Help"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button><button class="iconbtn" data-act="canceledit" aria-label="Cancel"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+        <div class="chips">${STICKY_COLORS.map((c) => `<button class="pen" data-scolor="${c}" style="background:${c};border-color:var(--line)" aria-pressed="${(d.color || STICKY_COLORS[0]) === c}" aria-label="Colour ${c}"></button>`).join("")}</div>
+        <div class="form" style="margin-top:8px">
+          <div class="field"><label for="f_snotes">Note</label><textarea id="f_snotes" maxlength="1000" rows="5" placeholder="e.g. New borehole here? Ask Piet about the 3-phase supply." style="background:${esc(d.color || STICKY_COLORS[0])};color:#222">${esc(d.notes || "")}</textarea></div>
+          <div class="field"><label for="f_sname">Heading <span class="hint">(optional)</span></label><input type="text" id="f_sname" data-f="name" value="${esc(d.name === "Sticky note" ? "" : d.name)}" maxlength="60" placeholder="e.g. Plan for 2027"></div>
+          <div class="field inline"><label for="f_shid">Planning only<span class="hint" style="display:block">Clients never see it – admins show or hide planning notes under Layers</span></label><label class="switch"><input type="checkbox" id="f_shid" ${d.hidden ? "checked" : ""}><span></span></label></div>
+          <div class="field inline"><span class="small muted">Drag the note on the map (in Edit) to move it.</span></div>
+        </div>
+        <div class="actions">
           <button class="btn primary" data-act="saveshape">Save</button>
           <button class="btn" data-act="canceledit">Cancel</button>
           ${isNew ? "" : `<button class="btn danger" data-act="deleteshape" style="margin-left:auto">${this._confirm === "del" ? "Tap again to delete" : "Delete"}</button>`}
@@ -1473,17 +1512,28 @@ class HamletFarmPanel extends HTMLElement {
     if (this._pen) return;
     if (this._draw) { this._draw.coords.push([ll.lat, ll.lng]); this._fm.drawPreview(this._draw.kind, this._draw.coords); this._renderBanner(); return; }
     if (this._placing) { this._newPoint(ll.lat, ll.lng); return; }
+    if (this._placingNote) {
+      this._placingNote = false; this._renderBanner();
+      this._draft = { kind: "shape", id: Math.random().toString(16).slice(2, 10), shape_kind: "sticky", name: "", coords: [[ll.lat, ll.lng]], color: STICKY_COLORS[0], hidden: true, notes: "" };
+      this._renderSide(); setTimeout(() => this.$("f_snotes")?.focus(), 50); return;
+    }
     if (this._draft || !this._sel) return;
     this._sel = null; this._fm.setSelected(null); this._renderSide();
   }
 
   _shapeClick(id) {
-    if (this._draw || this._placing || this._measure || this._pen) return;
+    if (this._draw || this._placing || this._placingNote || this._measure || this._pen) return;
     if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
     this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info, show_len: s.show_len, hidden: s.hidden, notes: s.notes };
     this._renderSide();
+  }
+
+  async _moveShape(id, lat, lng) {
+    const sh = this._snap.shapes.find((x) => x.id === id); if (!sh) return;
+    if (this._draft?.id === id) this._draft.coords = [[lat, lng]];
+    try { await this._ws("save_shape", { shape: { ...sh, coords: [[lat, lng]] } }); this._toast("Note moved"); } catch (e) { this._toast(e.message); this._fm.update(this._mapSnap()); }
   }
 
   async _ws(type, extra) {
@@ -1559,7 +1609,7 @@ class HamletFarmPanel extends HTMLElement {
     }
     for (const sh of this._snap.shapes) {
       if (!this._shapeVisible(sh) && !(this._isAdmin && sh.hidden)) continue;
-      const m = match([["", sh.name], ["", SHAPES[sh.kind]?.label], ["Details", sh.info]]);
+      const m = match([["", sh.name], ["", SHAPES[sh.kind]?.label], ["Details", sh.info], ["Note", sh.notes]]);
       if (m) res.shapes.push({ sh, ...m });
     }
     for (const d of this._docs || []) {
@@ -1593,8 +1643,8 @@ class HamletFarmPanel extends HTMLElement {
     }
     for (const m of r.shapes.slice(0, 5)) {
       const d = SHAPES[m.sh.kind] || SHAPES.pipe;
-      add("Lines & land", `<span class="si plain"><span class="hline" style="display:inline-block;width:20px;height:5px;border-radius:3px;background:${m.sh.kind === "sketch" && m.sh.color ? m.sh.color : d.color}"></span></span>
-        <span class="st"><div>${hl(m.sh.name)}${m.sh.hidden ? " (planning)" : ""}</div><div class="ss">${why(m, `${d.label} · ${m.sh.kind === "field" ? fmtArea(areaM2(m.sh.coords)) : fmtDist(lineLength(m.sh.coords))}`)}</div></span>`, { kind: "shape", id: m.sh.id });
+      add("Lines & land", `<span class="si plain"><span class="hline" style="display:inline-block;width:20px;height:5px;border-radius:3px;background:${(m.sh.kind === "sketch" || m.sh.kind === "sticky") && m.sh.color ? m.sh.color : d.color}${m.sh.kind === "sticky" ? ";height:14px;width:14px;border-radius:2px" : ""}"></span></span>
+        <span class="st"><div>${hl(m.sh.name)}${m.sh.hidden ? " (planning)" : ""}</div><div class="ss">${why(m, `${d.label}${m.sh.kind === "sticky" ? "" : ` · ${m.sh.kind === "field" ? fmtArea(areaM2(m.sh.coords)) : fmtDist(lineLength(m.sh.coords))}`}`)}</div></span>`, { kind: "shape", id: m.sh.id });
     }
     for (const m of r.docs.slice(0, 5)) {
       const [kl, icon] = DOC_KINDS[m.d.kind] || DOC_KINDS.other;
@@ -1943,7 +1993,7 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "edit":
         this._stopPen();
-        this._edit = !this._edit; this._draft = null; this._draw = null; this._placing = false; this._fm.drawPreview(null, []);
+        this._edit = !this._edit; this._draft = null; this._draw = null; this._placing = false; this._placingNote = false; this._fm.drawPreview(null, []);
         this.$("editbtn").setAttribute("aria-pressed", String(this._edit));
         this._fm.update(this._mapSnap()); this._renderBanner(); this._renderSide(); break;
       case "close": this._sel = null; this._fm.setSelected(null); this._renderSide(); break;
@@ -1956,6 +2006,8 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "addpoint": this._placing = true; this._draft = null; this._renderBanner(); this._renderSide(); break;
       case "placecancel": this._placing = false; this._renderBanner(); break;
+      case "addnote": this._stopPen(); this._draft = null; this._draw = null; this._placing = false; this._placingNote = true; this._renderBanner(); this._renderSide(); break;
+      case "notecancel": this._placingNote = false; this._renderBanner(); break;
       case "gpsset": {
         const g = parseGPS(this.$("f_gps").value);
         if (!g) { this.$("gpserr").textContent = "Couldn't read that – e.g. -25.861234, 28.103456"; return; }
@@ -1991,7 +2043,13 @@ class HamletFarmPanel extends HTMLElement {
         break;
       case "saveshape": {
         this._readForm(); const d = this._draft;
-        try { await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info, show_len: d.show_len, hidden: d.hidden, notes: d.notes } }); this._draft = null; this._fm.drawPreview(null, []); this._renderSide(); this._toast("Saved"); }
+        try {
+          await this._ws("save_shape", { shape: { id: d.id, kind: d.shape_kind, name: d.name, coords: d.coords, color: d.color, info: d.info, show_len: d.show_len, hidden: d.hidden, notes: d.notes } });
+          this._draft = null; this._fm.drawPreview(null, []); this._renderSide();
+          if (d.hidden && !this._layers.planning) { this._layers.planning = true; this._saveLayers(); this._renderLayers(); this._toast("Saved – planning items are now shown (hide them under Layers)"); }
+          else if (d.shape_kind === "sticky" && this._layers.sticky === false) { this._layers.sticky = true; this._saveLayers(); this._renderLayers(); this._toast("Saved"); }
+          else this._toast("Saved");
+        }
         catch (e) { this.$("ferr").textContent = e.message; }
         break;
       }
