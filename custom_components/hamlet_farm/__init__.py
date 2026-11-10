@@ -21,7 +21,10 @@ from .offline import OfflineTileView, OfflineUploadView, remove_tree, root_dir
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_URL = f"{STATIC_URL}/hamlet-farm-card.js?v={VERSION}"
+# every version gets its own folder URL, so the browser / phone app can never mix a new panel
+# with old cached helper files (they are imported with relative paths, without ?v=)
+FRONTEND_URL = f"/hamlet_farm_v/{VERSION}"
+CARD_URL = f"{FRONTEND_URL}/hamlet-farm-card.js"
 PLATFORMS = [Platform.SENSOR]
 
 
@@ -79,7 +82,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         data["_views"] = True
     if not data.get("_static"):
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
+            [StaticPathConfig(FRONTEND_URL, str(Path(__file__).parent / "frontend"), cache_headers=True),
+             StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)]
         )
         data["_static"] = True
     if not data.get("_card"):
@@ -91,7 +95,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_COMPONENT,
-        module_url=f"{STATIC_URL}/hamlet-farm-panel.js?v={VERSION}",
+        module_url=f"{FRONTEND_URL}/hamlet-farm-panel.js",
         sidebar_title="Farm map",
         sidebar_icon="mdi:map-marker-radius",
         require_admin=False,
