@@ -20,6 +20,7 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "gate": ("Gate", "mdi:gate"),
     "camera": ("Camera", "mdi:cctv"),
     "weather": ("Weather station", "mdi:weather-partly-rainy"),
+    "probe": ("Temperature probe", "mdi:thermometer"),
     "solar": ("Solar / inverter", "mdi:solar-power-variant"),
     "generator": ("Generator", "mdi:engine"),
     "building": ("Building", "mdi:home-outline"),
@@ -32,7 +33,7 @@ SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500
 STICKY_COLORS = ("#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8", "#ffffff")
 
 # entity roles a point can have
-ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle"]
+ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle", "temperature", "humidity"]
 CORE_KEYS = ["control", "running", "power", "supply", "level", "angle"]   # unavailable -> point offline
 MAX_EXTRA = 8
 
@@ -113,6 +114,8 @@ def clean_point(raw: dict) -> dict:
         "pump_entry": pump,
         "radius": round(_float(raw.get("radius"), 0, 3000, 0) or 0),
         "low_level": _float(raw.get("low_level"), 0, 100, 20),
+        "temp_high": _float(raw.get("temp_high"), -60, 200) if raw.get("temp_high") not in (None, "") else None,
+        "temp_low": _float(raw.get("temp_low"), -60, 200) if raw.get("temp_low") not in (None, "") else None,
         "alert": bool(raw.get("alert", True)),
         "notes": _txt(raw.get("notes"), 500),
         "specs": _specs(raw.get("specs"), ptype),
@@ -312,6 +315,12 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         if (rd := r.get(k)) is not None and (n := to_num(rd.state)) is not None:
             values[k] = round(n, 2)
             values[f"{k}_unit"] = rd.unit or ""
+    if (rd := r.get("temperature")) is not None and (n := to_num(rd.state)) is not None:
+        if rd.unit in ("°F", "F"):
+            n = (n - 32) * 5 / 9
+        values["temp"] = round(n, 1)
+    if (rd := r.get("humidity")) is not None and (n := to_num(rd.state)) is not None:
+        values["humidity"] = round(n)
     if (rd := r.get("angle")) is not None and (n := to_num(rd.state)) is not None:
         values["angle"] = round(n % 360, 1)
     if (rd := r.get("supply")) is not None and (n := to_num(rd.state)) is not None and (rd.unit == "V" or n > 1):
@@ -324,7 +333,7 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     running = None
     if (rd := r.get("running")) is not None:
         running = to_bool(rd.state)
-    elif w is not None and point.get("type") not in ("eskom", "transformer", "solar", "building", "weather"):
+    elif w is not None and point.get("type") not in ("eskom", "transformer", "solar", "building", "weather", "probe"):
         running = w >= RUNNING_MIN_W
     elif on is not None and point.get("type") in ("pump", "booster", "pivot", "generator"):
         running = on
@@ -400,6 +409,13 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     if lvl is not None and low and lvl < low:
         return out(f"Low · {lvl:.0f}%", "warn")
 
+    # 6c. temperature too high / too low (frost)
+    t = values.get("temp")
+    if t is not None and point.get("temp_high") is not None and t > point["temp_high"]:
+        return out(f"Hot · {t:.1f} °C", "warn")
+    if t is not None and point.get("temp_low") is not None and t < point["temp_low"]:
+        return out(f"Cold · {t:.1f} °C", "warn")
+
     # 7. running / on / off
     if running:
         if point.get("type") == "pivot" and "angle" in values:
@@ -419,6 +435,8 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         return out("Power on", "on", False)
     if lvl is not None:
         return out(f"{lvl:.0f}%", "on", False)
+    if t is not None:
+        return out(f"{t:.1f} °C" + (f" · {values['humidity']}%" if "humidity" in values else ""), "on", False)
     return out("OK", "info", False)
 
 

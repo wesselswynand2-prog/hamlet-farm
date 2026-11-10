@@ -172,3 +172,17 @@ def test_sticky_note():
         logic.clean_shape({"kind": "sticky", "coords": [[-25.1, 28.2]]})
     with pytest.raises(ValueError):
         logic.clean_shape({"kind": "sticky", "coords": [], "notes": "x"})
+
+
+def test_temperature_probe():
+    p = logic.clean_point({"name": "Frost probe", "type": "probe", "lat": -25.1, "lng": 28.2,
+                           "entities": {"temperature": "sensor.outside_temp", "humidity": "sensor.outside_rh"}, "temp_low": "1", "temp_high": ""})
+    assert p["temp_low"] == 1 and p["temp_high"] is None
+    rd = lambda v, u="°C": (lambda e: logic.Reading(v, u) if e == "sensor.outside_temp" else logic.Reading("64", "%"))
+    st = logic.point_status(p, rd("18.44"))
+    assert st["status"] == "18.4 °C · 64%" and st["cls"] == "on" and st["values"]["temp"] == 18.4 and st["values"]["humidity"] == 64
+    st = logic.point_status(p, rd("-1.5"))
+    assert st["status"] == "Cold · -1.5 °C" and st["cls"] == "warn" and st["alert"]
+    assert logic.point_status(p, rd("50", "°F"))["values"]["temp"] == 10.0
+    # a probe going offline is not a core entity -> point keeps its other status
+    assert logic.point_status(p, lambda e: None)["cls"] != "offline"

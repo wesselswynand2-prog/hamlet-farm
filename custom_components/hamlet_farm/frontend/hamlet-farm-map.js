@@ -3,20 +3,21 @@
 const BASE = new URL(".", import.meta.url).href;
 
 export const TYPES = {
-  pump: { label: "Borehole pump", icon: "mdi:water-pump", roles: ["control", "running", "power", "energy", "fault", "level", "pressure", "flow"] },
-  booster: { label: "Pressure pump", icon: "mdi:pump", roles: ["control", "running", "power", "pressure", "flow", "fault"] },
-  pivot: { label: "Centre pivot", icon: "mdi:sprinkler-variant", roles: ["control", "running", "angle", "power", "fault", "pressure"] },
+  pump: { label: "Borehole pump", icon: "mdi:water-pump", roles: ["control", "running", "power", "energy", "fault", "level", "pressure", "flow", "temperature"] },
+  booster: { label: "Pressure pump", icon: "mdi:pump", roles: ["control", "running", "power", "pressure", "flow", "fault", "temperature"] },
+  pivot: { label: "Centre pivot", icon: "mdi:sprinkler-variant", roles: ["control", "running", "angle", "power", "fault", "pressure", "temperature"] },
   eskom: { label: "Eskom point", icon: "mdi:transmission-tower", roles: ["energy", "power", "supply", "control"] },
-  transformer: { label: "Transformer", icon: "mdi:flash-triangle", roles: ["supply", "power", "energy", "fault"] },
-  tank: { label: "Tank / dam", icon: "mdi:water", roles: ["level", "flow"] },
+  transformer: { label: "Transformer", icon: "mdi:flash-triangle", roles: ["supply", "power", "energy", "fault", "temperature"] },
+  tank: { label: "Tank / dam", icon: "mdi:water", roles: ["level", "flow", "temperature"] },
   valve: { label: "Valve", icon: "mdi:valve", roles: ["control", "flow", "pressure"] },
   gate: { label: "Gate", icon: "mdi:gate", roles: ["control", "running"] },
   camera: { label: "Camera", icon: "mdi:cctv", roles: [] },
-  weather: { label: "Weather station", icon: "mdi:weather-partly-rainy", roles: [] },
+  weather: { label: "Weather station", icon: "mdi:weather-partly-rainy", roles: ["temperature", "humidity"] },
+  probe: { label: "Temperature probe", icon: "mdi:thermometer", roles: ["temperature", "humidity"] },
   solar: { label: "Solar / inverter", icon: "mdi:solar-power-variant", roles: ["power", "energy", "supply", "fault"] },
-  generator: { label: "Generator", icon: "mdi:engine", roles: ["control", "running", "power", "fault"] },
-  building: { label: "Building", icon: "mdi:home-outline", roles: ["power", "energy", "control"] },
-  other: { label: "Other", icon: "mdi:map-marker", roles: ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow"] },
+  generator: { label: "Generator", icon: "mdi:engine", roles: ["control", "running", "power", "fault", "temperature"] },
+  building: { label: "Building", icon: "mdi:home-outline", roles: ["power", "energy", "control", "temperature"] },
+  other: { label: "Other", icon: "mdi:map-marker", roles: ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "temperature", "humidity"] },
 };
 export const ROLES = {
   control: { label: "Switch / relay", hint: "Shelly, Sonoff, contactor relay, valve or gate – gives On / Off buttons", domains: ["switch", "input_boolean", "light", "valve", "cover", "fan"] },
@@ -29,6 +30,8 @@ export const ROLES = {
   pressure: { label: "Pressure", hint: "", domains: ["sensor", "number"] },
   flow: { label: "Flow", hint: "", domains: ["sensor", "number"] },
   angle: { label: "Pivot position (°)", hint: "0° = north, clockwise – draws the pivot arm", domains: ["sensor", "number", "input_number"] },
+  temperature: { label: "Temperature (°C)", hint: "Outside probe, motor / panel / transformer temperature – shown on the map", domains: ["sensor", "number", "input_number"] },
+  humidity: { label: "Humidity (%)", hint: "", domains: ["sensor", "number"] },
 };
 export const SHAPES = {
   pipe: { label: "Water pipe", color: "#5aaeff", weight: 3, dash: null },
@@ -100,10 +103,12 @@ export function shortValue(p, st) {
     if (v.load_pct !== undefined) return kva ? `${Math.round(v.load_pct)}% · ${kva} kVA` : `${Math.round(v.load_pct)}%`;
     return kva ? `${kva} kVA` : "";
   }
+  if ((p.type === "probe" || p.type === "weather") && v.temp !== undefined) return `${v.temp.toFixed(1)} °C${v.humidity !== undefined ? ` · ${v.humidity}%` : ""}`;
   if (p.type === "pivot" && v.angle !== undefined) return `${Math.round(v.angle)}°`;
   if (v.level !== undefined && (p.type === "tank" || p.type === "pump")) return `${Math.round(v.level)}%`;
   if (v.power_w !== undefined && (st?.running || p.type === "eskom" || p.type === "solar")) return fmtW(v.power_w);
   if (v.level !== undefined) return `${Math.round(v.level)}%`;
+  if (v.temp !== undefined) return `${v.temp.toFixed(1)} °C`;
   return "";
 }
 

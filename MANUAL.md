@@ -157,6 +157,13 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 - **Delete one drawing or line:** Edit → tap it → **Delete** (twice).
 - **Delete all drawings:** **Layers → Delete all drawings** (twice). Pipes, cables and other lines stay.
 
+## Temperature probes (admin)
+
+- **Edit → Point → Temperature probe**, place it where the probe is, and pick its **Temperature** sensor (and **Humidity** if it has one). The map shows e.g. *18.4 °C · 64%* under the name.
+- Any point can show a temperature too – a pump's motor, a transformer or a panel: pick the sensor under **Temperature** on that point.
+- **Temperature alert:** fill in *below* (e.g. 2 °C for frost) and/or *above*. The marker turns orange and, with alerts on, a notification is sent.
+- The **History** tab draws the temperature graph. Probes in °F are shown in °C.
+
 ## Sticky notes (admin)
 
 - **Edit → Sticky note**, then tap the map where it goes. Write the note, pick a colour and tap **Save**.

@@ -806,6 +806,8 @@ class HamletFarmPanel extends HTMLElement {
     if (v.pressure !== undefined) kv("Pressure", `${fmtN(v.pressure, 2)} ${esc(v.pressure_unit || "")}`);
     if (v.flow !== undefined) kv("Flow", `${fmtN(v.flow, 1)} ${esc(v.flow_unit || "")}`);
     if (v.angle !== undefined) kv("Pivot position", `${fmtN(v.angle, 0)}°`);
+    if (v.temp !== undefined) kv("Temperature", `${fmtN(v.temp, 1)} °C${p.temp_low != null || p.temp_high != null ? ` <span class="muted small">(alert ${[p.temp_low != null ? `below ${p.temp_low}` : "", p.temp_high != null ? `above ${p.temp_high}` : ""].filter(Boolean).join(" / ")} °C)</span>` : ""}`);
+    if (v.humidity !== undefined) kv("Humidity", `${v.humidity}%`);
     if (v.load_pct !== undefined) {
       const nmd = p.type === "eskom" && p.specs?.nmd;
       kv("Load", `≈ ${fmtN(v.load_pct, 0)}% of ${nmd ? `${p.specs.nmd} kVA NMD` : `${p.specs?.kva} kVA`}`);
@@ -1389,7 +1391,8 @@ class HamletFarmPanel extends HTMLElement {
             <textarea id="f_extra" data-f="extra" rows="2" spellcheck="false" placeholder="camera.borehole&#10;sensor.dam_temperature">${esc(d.extra.join("\n"))}</textarea>
             <input type="text" id="f_extra_add" list="dl-extra" placeholder="Search to add…" autocomplete="off"></div>
           ${["tank", "pump", "other"].includes(d.type) || d.entities.level ? `<div class="field inline"><label for="f_low">Low level alert below</label><span class="small muted"><input type="number" id="f_low" data-f="low_level" min="0" max="100" value="${esc(d.low_level)}"> %</span></div>` : ""}
-          <div class="field inline"><label for="f_alert">Alert when this point has a problem<span class="hint" style="display:block">Fault, no power, offline, low level</span></label>
+          ${d.entities.temperature || ["probe", "weather"].includes(d.type) ? `<div class="field inline"><label for="f_tlow">Temperature alert<span class="hint" style="display:block">Leave empty for no alert – e.g. below 2 °C for frost</span></label><span class="small muted">below <input type="number" id="f_tlow" data-f="temp_low" step="0.5" style="width:64px" value="${esc(d.temp_low ?? "")}"> above <input type="number" id="f_thigh" data-f="temp_high" step="0.5" style="width:64px" value="${esc(d.temp_high ?? "")}"> °C</span></div>` : ""}
+          <div class="field inline"><label for="f_alert">Alert when this point has a problem<span class="hint" style="display:block">Fault, no power, offline, low level, temperature</span></label>
             <label class="switch"><input type="checkbox" id="f_alert" data-f="alert" ${d.alert ? "checked" : ""}><span></span></label></div>
           <div class="field"><label for="f_cards">Cards on the point's page</label><span class="hint">Any dashboard card as YAML – e.g. the panel meter card. Several cards: put <code>---</code> between them.</span>
             <textarea id="f_cards" data-f="cards" rows="${d.cards ? 8 : 2}" spellcheck="false" style="font-family:monospace;font-size:12px" placeholder="type: custom:panel-meter-card">${esc(d.cards || "")}</textarea>
@@ -1725,6 +1728,7 @@ class HamletFarmPanel extends HTMLElement {
       if (f === "alert") d.alert = el.checked;
       else if (f === "extra") d.extra = el.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
       else if (f === "radius" || f === "low_level") d[f] = Number(el.value) || 0;
+      else if (f === "temp_low" || f === "temp_high") d[f] = el.value === "" || isNaN(Number(el.value)) ? null : Number(el.value);
       else if (f === "pump_entry") d.pump_entry = el.value || null;
       else if (f === "cards") d.cards = el.value;
       else d[f] = el.value;
