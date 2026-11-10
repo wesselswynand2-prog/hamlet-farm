@@ -186,3 +186,38 @@ def test_temperature_probe():
     assert logic.point_status(p, rd("50", "°F"))["values"]["temp"] == 10.0
     # a probe going offline is not a core entity -> point keeps its other status
     assert logic.point_status(p, lambda e: None)["cls"] != "offline"
+
+
+IRR_SNAP = {"type": "irrigation", "mode": "auto", "fault": None, "zones": ["Front lawn", "Orchard", "Veggies"], "next": "2026-11-11T05:00:00+02:00",
+            "decision": {"status": "Watering", "reason": "Morning: zone 2 until 05:18", "on": True, "zone": 1, "program": "Morning"},
+            "live": {"running": True, "power": 1400, "pressure": 3.1, "zones": [False, True, False]}}
+
+
+def test_irrigation_point_zones():
+    p = pt(type="irrigation", pump_entry="irr", zones=["f1", "bad id!", "f3", "", ""])
+    assert p["zones"] == ["f1", "", "f3"]                      # bad ids dropped, trailing blanks trimmed
+    assert pt(type="pump", zones=["f1"])["zones"] == []         # only irrigation points keep zones
+    st = logic.point_status(p, reader({}), IRR_SNAP)
+    assert st["cls"] == "run" and st["status"] == "Watering"
+    assert [z["open"] for z in st["values"]["zones"]] == [False, True, False]
+    assert st["values"]["zones"][1] == {"name": "Orchard", "open": True, "active": True}
+    assert st["values"]["program"] == "Morning" and st["values"]["next_program"]
+
+
+def test_watering_zones_on_land():
+    p = pt(id="irr1", type="irrigation", pump_entry="irr", zones=["f1", "f2", "f3"])
+    sts = {"irr1": logic.point_status(p, reader({}), IRR_SNAP)}
+    w = logic.watering_zones([p, pt(id="x")], sts)
+    assert w == {"f1": {"point": "irr1", "zone": 0, "name": "Front lawn", "open": False},
+                 "f2": {"point": "irr1", "zone": 1, "name": "Orchard", "open": True},
+                 "f3": {"point": "irr1", "zone": 2, "name": "Veggies", "open": False}}
+    # pump not loaded yet: zones still linked, nothing open
+    w = logic.watering_zones([p], {"irr1": logic.point_status(p, reader({}))})
+    assert w["f2"] == {"point": "irr1", "zone": 1, "name": "Zone 2", "open": False}
+    # two zones on the same camp: the open one wins
+    p2 = pt(id="irr1", type="irrigation", zones=["f2", "f2"])
+    assert logic.watering_zones([p2], sts)["f2"]["open"] is True
+
+
+def test_irrigation_specs():
+    assert pt(type="irrigation", specs={"motor_kw": 2.2, "pressure_set": "PID 3 bar", "depth": 80})["specs"] == {"motor_kw": 2.2, "pressure_set": "PID 3 bar"}

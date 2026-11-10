@@ -24,7 +24,7 @@ Nothing on the map can be changed by accident – On / Off buttons need **two ta
 | ◌ Grey, dashed | Offline – no signal. Often the Shelly / meter lost power or Wi-Fi |
 | ⚪ White | Just a marker, nothing linked |
 
-**Lines:** ▬ water pipe · ▬ cable 1 000 V · ▬ cable 3 300 V · ▬ MV cable · ▬ overhead power line · ▬ fence · ▬ road · ▬ land / camp.
+**Lines:** ▬ water pipe · ▬ cable 1 000 V · ▬ cable 3 300 V · ▬ MV cable · ▬ overhead power line · ▬ fence · ▬ road · ▬ land / camp · ▬ irrigation zone watering now (land turns blue).
 
 ## Moving around the map
 
@@ -180,6 +180,7 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 ## Pumps and dashboard cards on a page (admin)
 
 - **Hamlet Pump:** for a borehole or pressure pump, pick the pump under **Hamlet Pump** in the point's settings. Its status, protection and modes come from the Pumps page; its pump card shows on the point's page.
+- **Irrigation zones:** first draw each zone as land (**Line / land** → *Land / camp*, tap around it, **Finish**, name it). Then add an **Irrigation** point at the pump, pick the irrigation pump under **Hamlet Pump**, and under **Zones on the map** pick the land each zone waters. While a zone waters, its land turns blue on the map (dashed green when it isn't watering), and the pump's marker says *Zone 2 watering*. The point's page lists every zone – **Watering** or not – with a button to show that land on the map. Zones not on the map still show on the page.
 - **Any dashboard card** (e.g. the panel meter card): in the point's settings, **Cards on the point's page** → paste the card's YAML, or tap **Add panel meter** for a template and change the sensor names to the meter's own. Put `---` between several cards. Custom cards must be installed through HACS on that Home Assistant.
 
 ```yaml

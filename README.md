@@ -5,6 +5,7 @@ A satellite map of the client's farm in Home Assistant – like Google Maps, but
 | On the map | What it shows / does |
 |---|---|
 | **Borehole / pressure pump** | Running (green, pulsing), off, fault, offline. Power, level, pressure, flow. On / Off buttons – or link a **Hamlet Pump** and get its status, protection and Auto / Run / On / Off modes. |
+| **Irrigation** | Link an irrigation **Hamlet Pump** and put each valve zone on a piece of land – the land turns blue while that zone waters. Zones, program and next start on the point's page. |
 | **Centre pivot** | The pivot circle drawn to size on the land, the arm at its live position (°), running or stopped, hectares. |
 | **Eskom point** | The client's Eskom supply: account number, meter number, pole / transformer number, transformer size, NMD, supply voltage and tariff. Live: power on / **No power**, kW now, a kWh meter (used today, this month, meter reading) and load ≈ % of the NMD – **Above NMD** when over. **Report to Eskom** calls 08600 37566 with the account and pole number on screen. |
 | **Transformer** | Size (kVA) and voltages (e.g. 22 kV → 1000 V), full-load current, power on / no power, and load ≈ % of its kVA from a power meter – **Overloaded** above 100 %. |

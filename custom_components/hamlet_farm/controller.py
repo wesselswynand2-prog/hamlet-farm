@@ -175,8 +175,16 @@ class FarmController:
                 self._pump_unsubs[pid] = pumps[pid].add_listener(self._schedule_push)
 
     def pump_list(self) -> list[dict]:
-        return [{"entry_id": k, "name": getattr(v, "name", k), "type": getattr(v, "pump_type", "")}
-                for k, v in self._pump_controllers().items()]
+        out = []
+        for k, v in self._pump_controllers().items():
+            item = {"entry_id": k, "name": getattr(v, "name", k), "type": getattr(v, "pump_type", "")}
+            if item["type"] == "irrigation":
+                try:
+                    item["zones"] = list(v.snapshot().get("zones") or [])
+                except Exception:  # noqa: BLE001
+                    item["zones"] = []
+            out.append(item)
+        return out
 
     # ------------------------------------------------------------ status
     def _read(self, entity_id: str) -> logic.Reading | None:
@@ -683,6 +691,7 @@ class FarmController:
             "view": self.view,
             "settings": self.settings,
             "statuses": self.statuses,
+            "watering": logic.watering_zones(self.points, self.statuses),
             "summary": self.summary,
             "events": list(reversed(self.events[-10:])),
             "offline": [x for x in self.offline if x.get("status") == "ready"],

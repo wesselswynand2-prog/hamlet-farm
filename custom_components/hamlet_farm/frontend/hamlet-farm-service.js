@@ -19,6 +19,11 @@ export const INSTALL_FIELDS = {
     ["pump_model", "Pump make / model", "txt", "", "e.g. DAB K 35/40 T"], ["starter", "Starter", "txt", "", "", STARTERS],
     ["pressure_set", "Pressure setting", "txt", "", "e.g. 2.0 on / 3.5 bar off"], ["serial", "Serial number", "txt"], ["installer", "Installed by", "txt"],
   ],
+  irrigation: [
+    ["installed", "Installed on", "date"], ["motor_kw", "Motor size", "num", "kW", "", MOTOR_KW], ["motor", "Motor make / model", "txt"],
+    ["pump_model", "Pump make / model", "txt", "", "e.g. Grundfos CM 5-6"], ["starter", "Starter", "txt", "", "", STARTERS],
+    ["pressure_set", "Pressure setting", "txt", "", "e.g. VFD PID 3.0 bar"], ["serial", "Serial number", "txt"], ["installer", "Installed by", "txt"],
+  ],
   pivot: [
     ["installed", "Installed on", "date"], ["make", "Make / model", "txt", "", "e.g. Valley 8000"], ["towers", "Towers", "num"],
     ["motor_kw", "Main motor / pump", "num", "kW", "", MOTOR_KW], ["starter", "Starter", "txt", "", "", STARTERS],

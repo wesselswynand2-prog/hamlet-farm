@@ -13,6 +13,7 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "pump": ("Borehole pump", "mdi:water-pump"),
     "booster": ("Pressure pump", "mdi:pump"),
     "pivot": ("Centre pivot", "mdi:sprinkler-variant"),
+    "irrigation": ("Irrigation", "mdi:sprinkler"),
     "eskom": ("Eskom point", "mdi:transmission-tower"),
     "transformer": ("Transformer", "mdi:flash-triangle"),
     "tank": ("Tank / dam", "mdi:water"),
@@ -36,6 +37,7 @@ STICKY_COLORS = ("#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8
 ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle", "temperature", "humidity"]
 CORE_KEYS = ["control", "running", "power", "supply", "level", "angle"]   # unavailable -> point offline
 MAX_EXTRA = 8
+MAX_ZONES = 16
 
 UNAVAILABLE = ("unavailable", "unknown")
 ON_WORDS = {"on", "true", "open", "opening", "running", "home", "yes", "active", "heat", "cool", "auto"}
@@ -103,6 +105,14 @@ def clean_point(raw: dict) -> dict:
     if not re.match(r"^[A-Za-z0-9_-]+$", pid):
         pid = new_id()
     pump = _txt(raw.get("pump_entry"), 64) or None
+    # irrigation: zone i of the linked Hamlet Pump -> the land / camp it waters ("" = not on the map)
+    zones: list[str] = []
+    if ptype == "irrigation" and isinstance(raw.get("zones"), list):
+        for z in raw["zones"][:MAX_ZONES]:
+            z = _txt(z, 16)
+            zones.append(z if re.match(r"^[A-Za-z0-9_-]+$", z) else "")
+        while zones and not zones[-1]:
+            zones.pop()
     return {
         "id": pid,
         "name": name,
@@ -112,6 +122,7 @@ def clean_point(raw: dict) -> dict:
         "entities": ents,
         "extra": extra[:MAX_EXTRA],
         "pump_entry": pump,
+        "zones": zones,
         "radius": round(_float(raw.get("radius"), 0, 3000, 0) or 0),
         "low_level": _float(raw.get("low_level"), 0, 100, 20),
         "temp_high": _float(raw.get("temp_high"), -60, 200) if raw.get("temp_high") not in (None, "") else None,
@@ -135,6 +146,7 @@ SPEC_KEYS = {
     "pump": {"num": ("depth", "pump_depth", "water_level", "motor_kw", "yield"),
              "txt": ("installed", "pump_model", "motor", "starter", "cable", "pipe", "serial", "installer")},
     "booster": {"num": ("motor_kw",), "txt": ("installed", "pump_model", "motor", "starter", "pressure_set", "serial", "installer")},
+    "irrigation": {"num": ("motor_kw",), "txt": ("installed", "pump_model", "motor", "starter", "pressure_set", "serial", "installer")},
     "pivot": {"num": ("towers", "motor_kw"), "txt": ("installed", "make", "starter", "end_gun", "serial", "installer")},
     "generator": {"num": ("kva",), "txt": ("installed", "make", "starter", "serial", "installer")},
 }
@@ -335,7 +347,7 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         running = to_bool(rd.state)
     elif w is not None and point.get("type") not in ("eskom", "transformer", "solar", "building", "weather", "probe"):
         running = w >= RUNNING_MIN_W
-    elif on is not None and point.get("type") in ("pump", "booster", "pivot", "generator"):
+    elif on is not None and point.get("type") in ("pump", "booster", "pivot", "generator", "irrigation"):
         running = on
 
     def out(status: str, cls: str, run: bool | None = running) -> dict:
@@ -356,6 +368,18 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
             values["pressure"], values["pressure_unit"] = round(float(pp), 2), "bar"
         values["pump_mode"] = pump.get("mode")
         values["pump_reason"] = pump.get("fault") or d.get("reason") or ""
+        if pump.get("type") == "irrigation":
+            names = pump.get("zones") or []
+            opened = live.get("zones") or []
+            active = d.get("zone") if d.get("on") else None
+            values["zones"] = [{"name": n, "open": bool(i < len(opened) and opened[i]) or (prun and active == i),
+                                "active": active == i} for i, n in enumerate(names)]
+            if d.get("program"):
+                values["program"] = d["program"]
+            if pump.get("rain_delay_until"):
+                values["rain_delay_until"] = pump["rain_delay_until"]
+            if pump.get("next"):
+                values["next_program"] = pump["next"]
         if pump.get("fault") or st in PUMP_BAD:
             return out("Locked out" if pump.get("fault") else st, "bad", prun)
         if st in PUMP_WARN:
@@ -438,6 +462,24 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
     if t is not None:
         return out(f"{t:.1f} °C" + (f" · {values['humidity']}%" if "humidity" in values else ""), "on", False)
     return out("OK", "info", False)
+
+
+def watering_zones(points: list[dict], statuses: dict[str, dict]) -> dict[str, dict]:
+    """Land / camp id -> {point, zone, name, open} for every irrigation zone linked to a piece of land."""
+    out: dict[str, dict] = {}
+    for p in points:
+        if p.get("type") != "irrigation":
+            continue
+        zs = (statuses.get(p["id"], {}).get("values") or {}).get("zones") or []
+        for i, sid in enumerate(p.get("zones") or []):
+            if not sid:
+                continue
+            z = zs[i] if i < len(zs) else {}
+            prev = out.get(sid)
+            if prev and prev["open"]:
+                continue   # two zones on one camp: an open one wins
+            out[sid] = {"point": p["id"], "zone": i, "name": z.get("name") or f"Zone {i + 1}", "open": bool(z.get("open"))}
+    return out
 
 
 def summary(points: list[dict], statuses: dict[str, dict]) -> dict:

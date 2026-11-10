@@ -6,6 +6,7 @@ export const TYPES = {
   pump: { label: "Borehole pump", icon: "mdi:water-pump", roles: ["control", "running", "power", "energy", "fault", "level", "pressure", "flow", "temperature"] },
   booster: { label: "Pressure pump", icon: "mdi:pump", roles: ["control", "running", "power", "pressure", "flow", "fault", "temperature"] },
   pivot: { label: "Centre pivot", icon: "mdi:sprinkler-variant", roles: ["control", "running", "angle", "power", "fault", "pressure", "temperature"] },
+  irrigation: { label: "Irrigation", icon: "mdi:sprinkler", roles: ["control", "running", "power", "pressure", "flow", "fault", "temperature"] },
   eskom: { label: "Eskom point", icon: "mdi:transmission-tower", roles: ["energy", "power", "supply", "control"] },
   transformer: { label: "Transformer", icon: "mdi:flash-triangle", roles: ["supply", "power", "energy", "fault", "temperature"] },
   tank: { label: "Tank / dam", icon: "mdi:water", roles: ["level", "flow", "temperature"] },
@@ -45,6 +46,7 @@ export const SHAPES = {
   sketch: { label: "Drawing", color: "#ff3b30", weight: 4, dash: null },
   sticky: { label: "Sticky note", color: "#fff176", weight: 0, dash: null },
 };
+export const WATER_COLOR = "#2f8fff";
 export const SKETCH_COLORS = ["#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000"];
 export const STICKY_COLORS = ["#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8", "#ffffff"];
 
@@ -105,6 +107,7 @@ export function shortValue(p, st) {
   }
   if ((p.type === "probe" || p.type === "weather") && v.temp !== undefined) return `${v.temp.toFixed(1)} °C${v.humidity !== undefined ? ` · ${v.humidity}%` : ""}`;
   if (p.type === "pivot" && v.angle !== undefined) return `${Math.round(v.angle)}°`;
+  if (p.type === "irrigation" && v.zones) { const i = v.zones.findIndex((z) => z.open); if (i >= 0) return `Zone ${i + 1} watering`; }
   if (v.level !== undefined && (p.type === "tank" || p.type === "pump")) return `${Math.round(v.level)}%`;
   if (v.power_w !== undefined && (st?.running || p.type === "eskom" || p.type === "solar")) return fmtW(v.power_w);
   if (v.level !== undefined) return `${Math.round(v.level)}%`;
@@ -149,6 +152,10 @@ export const MAP_CSS = `
 .hf-icon { background: none; border: 0; }
 .hf-field-lbl { background: none; border: 0; box-shadow: none; color: #fff; font-size: 12px; font-weight: 500; text-shadow: 0 0 3px #000, 0 0 3px #000; }
 .hf-field-lbl::before { display: none; }
+.hf-watering { animation: hf-water 2.4s ease-in-out infinite; }
+@keyframes hf-water { 50% { fill-opacity: .2; } }
+.hf-field-lbl .hf-zone.on { color: #bfe0ff; font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .hf-watering { animation: none; } }
 .hf-handle { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid #2a78d6; box-shadow: 0 1px 5px rgba(0,0,0,.6); cursor: grab; }
 .hf-handle.move { width: 26px; height: 26px; background: #2a78d6; border-color: #fff; }
 .leaflet-pane.leaflet-offline-pane img { image-rendering: auto; }
@@ -290,7 +297,7 @@ export class FarmMap {
     }
     for (const [id, m] of this.markers) if (!seen.has(id)) { this.markerLayer.removeLayer(m); this.markers.delete(id); }
     for (const [id, g] of this.pivots) if (!seen.has(id)) { this.pivotLayer.removeLayer(g); this.pivots.delete(id); }
-    this._shapes(snap.shapes || []);
+    this._shapes(snap.shapes || [], snap.watering || {});
   }
 
   _pivot(p, st) {
@@ -323,13 +330,14 @@ export class FarmMap {
     this.cb.onShapeClick && this.cb.onShapeClick(id);
   }
 
-  _shapes(shapes) {
+  _shapes(shapes, watering = {}) {
     const L = this.L;
     const seen = new Set();
     for (const s of shapes) {
       if (this.shapeFilter && !this.shapeFilter(s)) continue;
       seen.add(s.id);
-      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len, s.hidden, s.kind === "sticky" ? s.notes : ""]);
+      const wz = s.kind === "field" ? watering[s.id] : null;   // an irrigation zone on this land
+      const key = JSON.stringify([s.kind, s.name, s.coords, s.color, s.info, s.show_len, s.hidden, s.kind === "sticky" ? s.notes : "", wz ? [wz.name, wz.open] : null]);
       const old = this.shapes.get(s.id);
       if (old && old._key === key + (s.color || "")) continue;
       if (old) this.shapeLayer.removeLayer(old);
@@ -341,8 +349,15 @@ export class FarmMap {
       const hit = () => { const h = L.polyline(s.coords, { opacity: 0, weight: 20, lineCap: "round" }); h.on("click", (e) => this._shapeHit(e, s.id)); return h; };
       let layer;
       if (s.kind === "field") {
-        layer = L.polygon(s.coords, { ...opts, fillColor: d.color, fillOpacity: 0.12 });
-        layer.bindTooltip(`${esc(s.name)}<br><small>${fmtArea(areaM2(s.coords))}</small>`, { permanent: true, direction: "center", className: "hf-field-lbl" });
+        if (wz && wz.open) {
+          // zone watering now: blue, gently pulsing
+          layer = L.polygon(s.coords, { ...opts, color: WATER_COLOR, weight: 3, fillColor: WATER_COLOR, fillOpacity: 0.38, className: "hf-watering" });
+        } else {
+          layer = L.polygon(s.coords, { ...opts, fillColor: d.color, fillOpacity: 0.12, ...(wz ? { dashArray: "6 4" } : {}) });
+        }
+        const zn = `Zone ${wz ? wz.zone + 1 : ""}${wz && wz.name && wz.name.toLowerCase() !== s.name.toLowerCase() && wz.name !== `Zone ${wz.zone + 1}` ? ` · ${esc(wz.name)}` : ""}`;
+        const zl = wz ? `<br><small class="hf-zone ${wz.open ? "on" : ""}">${zn}${wz.open ? " · watering" : ""}</small>` : "";
+        layer.bindTooltip(`${esc(s.name)}<br><small>${fmtArea(areaM2(s.coords))}</small>${zl}`, { permanent: true, direction: "center", className: "hf-field-lbl" });
       } else if (s.kind === "sketch") {
         const casing = L.polyline(s.coords, { color: color === "#000000" ? "#fff" : "#000", weight: d.weight + 2, opacity: 0.3, interactive: false, lineCap: "round", lineJoin: "round" });
         const line = L.polyline(s.coords, { ...opts, interactive: false });

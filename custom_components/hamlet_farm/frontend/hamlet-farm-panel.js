@@ -862,6 +862,7 @@ class HamletFarmPanel extends HTMLElement {
         ${v.pump_reason ? `<div class="reason">${esc(v.pump_reason)}</div>` : ""}
         ${ctl}
         ${rows.length ? `<div style="margin-top:14px">${rows.join("")}</div>` : ""}
+        ${p.type === "irrigation" ? this._zonesNowHtml(p, v) : ""}
         ${cams.join("")}`);
     const sp = p.specs || {};
     const inst = installRows(p); const svc = this._snap.service?.[p.id]; const due = dueText(svc?.next);
@@ -1322,6 +1323,36 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   /* ------------------------------------------------------------ editor */
+  /** Irrigation: which land / camp each zone of the linked Hamlet Pump waters. */
+  _zoneFieldsHtml(d) {
+    const pump = this._pumps.find((x) => x.entry_id === d.pump_entry);
+    if (!pump) return `<p class="note">Link the irrigation pump from the Pumps page above – then each of its zones can be put on a piece of land.</p>`;
+    if (pump.type !== "irrigation") return `<p class="note">${esc(pump.name)} is not an irrigation pump – zones only come from an irrigation pump.</p>`;
+    const zones = pump.zones || [];
+    if (!zones.length) return `<p class="note">${esc(pump.name)} has no valves (zones) set up – the pump runs on its own.</p>`;
+    const lands = (this._snap.shapes || []).filter((x) => x.kind === "field");
+    const opts = (cur) => `<option value="">– not on the map –</option>${lands.map((l) => `<option value="${esc(l.id)}" ${cur === l.id ? "selected" : ""}>${esc(l.name)} · ${fmtArea(areaM2(l.coords))}</option>`).join("")}`;
+    return `<div class="field"><label>Zones on the map</label>
+      <span class="hint">${lands.length ? "Pick the land each zone waters – it turns blue on the map while that zone is watering." : "Draw each zone first: Line / land → Land / camp, tap around it, Finish. Then pick it here."}</span>
+      ${zones.map((z, i) => `<div class="field inline" style="padding:4px 0"><label for="f_zone${i}">${i + 1}. ${esc(z)}</label>
+        <select id="f_zone${i}" data-zone="${i}" style="max-width:220px" ${lands.length ? "" : "disabled"}>${opts((d.zones || [])[i] || "")}</select></div>`).join("")}</div>`;
+  }
+
+  _zonesNowHtml(p, v) {
+    const zs = v.zones || [];
+    if (!zs.length) return "";
+    const lands = Object.fromEntries((this._snap.shapes || []).filter((x) => x.kind === "field").map((l) => [l.id, l]));
+    const rows = zs.map((z, i) => {
+      const land = lands[(p.zones || [])[i]];
+      return `<div class="kv zrow ${z.open ? "on" : ""}"><span><ha-icon icon="${z.open ? "mdi:sprinkler-variant" : "mdi:sprinkler"}" style="--mdc-icon-size:18px;color:${z.open ? "var(--c-water, #2f8fff)" : "var(--muted)"}"></ha-icon>
+        ${i + 1}. ${esc(z.name)}${land ? ` <span class="muted small">· ${land.name.toLowerCase() !== z.name.toLowerCase() ? `${esc(land.name)} · ` : ""}${fmtArea(areaM2(land.coords))}</span>` : ` <span class="muted small">· not on the map</span>`}</span>
+        <span>${z.open ? `<b style="color:var(--c-water, #2f8fff)">Watering</b>` : `<span class="muted">–</span>`}${land ? ` <button class="iconbtn" data-act="zoneshow" data-shape="${esc(land.id)}" title="Show on the map" aria-label="Show on the map" style="padding:2px"><ha-icon icon="mdi:map-search-outline" style="--mdc-icon-size:18px"></ha-icon></button>` : ""}</span></div>`;
+    }).join("");
+    const extra = [v.program ? `Program: ${esc(v.program)}` : "", v.rain_delay_until ? `Rain delay until ${esc(new Date(v.rain_delay_until).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }))}` : "",
+      v.next_program ? `Next program ${esc(new Date(v.next_program).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }))}` : ""].filter(Boolean).join(" · ");
+    return `<h3>Zones</h3>${rows}${extra ? `<div class="small muted" style="margin-top:6px">${extra}</div>` : ""}`;
+  }
+
   _renderEditor() {
     const d = this._draft;
     if (d.kind === "shape") return this._renderShapeEditor();
@@ -1362,8 +1393,9 @@ class HamletFarmPanel extends HTMLElement {
           <div class="field"><label for="f_gps">GPS position</label><span class="hint">Type or paste: -25.861234, 28.103456 · 25°51'40"S 28°06'12"E · a Google Maps link – or drag the point on the map</span>
             <div class="ent"><input type="text" id="f_gps" value="${Number(d.lat).toFixed(6)}, ${Number(d.lng).toFixed(6)}" autocomplete="off" spellcheck="false" inputmode="text">
             <button class="btn" data-act="gpsset" style="padding:6px 12px">Move</button></div><div class="err" id="gpserr"></div></div>
-          ${["pump", "booster", "other"].includes(d.type) && this._pumps.length ? `<div class="field"><label for="f_pump">Hamlet Pump</label><span class="hint">Link a pump from the Pumps page – status, protection and modes come from there</span>
+          ${["pump", "booster", "irrigation", "other"].includes(d.type) && this._pumps.length ? `<div class="field"><label for="f_pump">Hamlet Pump</label><span class="hint">Link a pump from the Pumps page – status, protection and modes come from there</span>
             <select id="f_pump" data-f="pump_entry"><option value="">– not linked –</option>${this._pumps.map((pp) => `<option value="${esc(pp.entry_id)}" ${d.pump_entry === pp.entry_id ? "selected" : ""}>${esc(pp.name)}</option>`).join("")}</select></div>` : ""}
+          ${d.type === "irrigation" ? this._zoneFieldsHtml(d) : ""}
           ${d.type === "transformer" ? `
           <div class="field inline"><label for="f_kva">Size</label><span class="small muted"><input type="number" id="f_kva" data-spec="kva" min="0" step="any" list="dl-kva" value="${esc(d.specs?.kva ?? "")}"> kVA</span></div>
           <div class="field inline"><label for="f_prim">Primary (in)</label><input type="text" id="f_prim" data-spec="primary" list="dl-volt" value="${esc(d.specs?.primary || "")}" placeholder="11 kV" style="max-width:140px"></div>
@@ -1498,7 +1530,7 @@ class HamletFarmPanel extends HTMLElement {
   _newPoint(lat, lng) {
     this._placing = false;
     const id = Math.random().toString(16).slice(2, 10);
-    this._draft = { kind: "point", id, name: "", type: "pump", lat, lng, entities: {}, extra: [], pump_entry: null, radius: 400, low_level: 20, alert: true, notes: "", specs: {} };
+    this._draft = { kind: "point", id, name: "", type: "pump", lat, lng, entities: {}, extra: [], pump_entry: null, zones: [], radius: 400, low_level: 20, alert: true, notes: "", specs: {} };
     this._sel = null; this._fm.setSelected(null);
     this._renderBanner(); this._renderSide();
     this._fm.update(this._mapSnap());   // show the new point on the map straight away
@@ -1722,6 +1754,8 @@ class HamletFarmPanel extends HTMLElement {
     if (d.kind === "shape") { d.name = root.getElementById("f_sname")?.value.trim() || ""; if (root.getElementById("f_sinfo")) d.info = root.getElementById("f_sinfo").value.trim(); if (root.getElementById("f_slen")) d.show_len = root.getElementById("f_slen").checked; if (root.getElementById("f_shid")) d.hidden = root.getElementById("f_shid").checked; if (root.getElementById("f_snotes")) d.notes = root.getElementById("f_snotes").value; return; }
     d.specs = d.specs || {};
     root.querySelectorAll("[data-spec]").forEach((el) => { const v = el.value.trim(); if (v) d.specs[el.dataset.spec] = el.type === "number" ? Number(v) : v; else delete d.specs[el.dataset.spec]; });
+    const zsel = root.querySelectorAll("[data-zone]");
+    if (zsel.length) { d.zones = []; zsel.forEach((el) => { d.zones[Number(el.dataset.zone)] = el.value || ""; }); }
     root.querySelectorAll("[data-role]").forEach((el) => { const v = el.value.trim(); if (v) d.entities[el.dataset.role] = v; else delete d.entities[el.dataset.role]; });
     root.querySelectorAll("[data-f]").forEach((el) => {
       const f = el.dataset.f;
@@ -1876,6 +1910,11 @@ class HamletFarmPanel extends HTMLElement {
         if (this._pen.plan && !this._layers.planning) { this._layers.planning = true; this._saveLayers(); this._toast("Planning lines are shown – switch them off under Layers"); }
         this._renderBanner(); break;
       case "pageback": this._closePage(); break;
+      case "zoneshow": {
+        const sh = this._snap.shapes.find((x) => x.id === t.dataset.shape); if (!sh) break;
+        this._closePage(); setTimeout(() => this._fm.map.fitBounds(sh.coords, { padding: [40, 40], maxZoom: 18 }), 50);
+        break;
+      }
       case "colorall": {
         this._readForm(); const d = this._draft;
         const same = this._snap.points.filter((x) => x.type === d.type);
