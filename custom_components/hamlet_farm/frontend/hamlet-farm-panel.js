@@ -271,6 +271,30 @@ const ICON = (t) => TYPES[t]?.icon || "mdi:map-marker";
 /** style for a round point badge: the point's own colour (or status colour) with a readable icon colour */
 const dotStyle = (p, cls) => { const c = pointColor(p, cls); return c === clsColor(cls, p.type) ? `--mc:${c}` : `--mc:${c};color:${inkOn(c)};border:0`; };
 
+/** Delta CP2000 card (wesselswynand2-prog/delta-cp2000-card) for a point: uses the point's own sensors where mapped,
+ *  else sensor names made from the point's name (vfd_<name>_…), so each VFD on the farm gets its own. */
+export function vfdCardYaml(d) {
+  const e = d.entities || {};
+  const slug = (String(d.name || "pump").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "pump");
+  const id = (x) => `sensor.vfd_${slug}_${x}`;
+  const pid = ["booster", "irrigation"].includes(d.type) || !!e.pressure;
+  return [
+    "type: custom:delta-cp2000-card",
+    "mode: entities",
+    `name: ${JSON.stringify(d.name || "VFD")}`,
+    "max_frequency: 50",
+    "entities:",
+    `  running: ${e.running || `binary_sensor.vfd_${slug}_running`}`,
+    `  fault: ${e.fault || id("fault_code")}`,
+    `  output_frequency: ${id("output_frequency")}`,
+    `  output_current: ${id("output_current")}`,
+    `  output_power: ${e.power || id("output_power")}`,
+    `  dc_bus_voltage: ${id("dc_bus_voltage")}`,
+    ...(pid ? [`  pid_feedback: ${e.pressure || id("pressure")}`, "setpoint_type: pressure   # LCD shows set / actual pressure", "p_unit: bar", "p_max: 10"] : []),
+    "show_controls: false   # monitor only; to start/stop from the card add control: (see the card's README)",
+  ].join("\n");
+}
+
 class HamletFarmPanel extends HTMLElement {
   constructor() {
     super();
@@ -1428,7 +1452,8 @@ class HamletFarmPanel extends HTMLElement {
             <label class="switch"><input type="checkbox" id="f_alert" data-f="alert" ${d.alert ? "checked" : ""}><span></span></label></div>
           <div class="field"><label for="f_cards">Cards on the point's page</label><span class="hint">Any dashboard card as YAML – e.g. the panel meter card. Several cards: put <code>---</code> between them.</span>
             <textarea id="f_cards" data-f="cards" rows="${d.cards ? 8 : 2}" spellcheck="false" style="font-family:monospace;font-size:12px" placeholder="type: custom:panel-meter-card">${esc(d.cards || "")}</textarea>
-            <div class="actions" style="margin-top:4px"><button class="btn" data-act="cardmeter" style="padding:4px 12px"><ha-icon icon="mdi:gauge"></ha-icon>Add panel meter</button></div></div>
+            <div class="actions" style="margin-top:4px"><button class="btn" data-act="cardmeter" style="padding:4px 12px"><ha-icon icon="mdi:gauge"></ha-icon>Add panel meter</button>
+              <button class="btn" data-act="cardvfd" style="padding:4px 12px"><ha-icon icon="mdi:sine-wave"></ha-icon>Add CP2000 VFD</button></div></div>
           <div class="field"><label for="f_notes">Notes</label><textarea id="f_notes" data-f="notes" maxlength="500" placeholder="e.g. 7.5 kW submersible, 80 m deep. Key at the farm office.">${esc(d.notes)}</textarea></div>
 
         </div>
@@ -1967,6 +1992,13 @@ class HamletFarmPanel extends HTMLElement {
         d.cards = d.cards?.trim() ? `${d.cards.trim()}\n---\n${tpl}` : tpl;
         this._renderSide();
         this._toast("Panel meter added – change the sensor names to the meter's own");
+        break;
+      }
+      case "cardvfd": {
+        this._readForm(); const d = this._draft;
+        d.cards = d.cards?.trim() ? `${d.cards.trim()}\n---\n${vfdCardYaml(d)}` : vfdCardYaml(d);
+        this._renderSide();
+        this._toast("CP2000 card added – change the sensor names to this VFD's own");
         break;
       }
       case "docnew": this._newDoc(ds.docpoint); break;
