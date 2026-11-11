@@ -413,8 +413,18 @@ class HamletFarmPanel extends HTMLElement {
     this._fm.shapeFilter = (sh) => this._shapeVisible(sh);
     this._fm.setLabels(this._labels);
     await this._selectFarm(this._entries.some((e) => e.entry_id === saved) ? saved : this._entries[0].entry_id);
+    this._openWanted();
+    if (!this._locListener) {
+      // coming back from the Pumps page (its Back button) to /hamlet-farm?point=… reopens that point's page
+      this._locListener = () => setTimeout(() => { if (this.isConnected && location.pathname.startsWith("/hamlet-farm")) this._openWanted(); }, 50);
+      window.addEventListener("location-changed", this._locListener);
+    }
+  }
+
+  _openWanted() {
     const want = new URLSearchParams(location.search).get("point");
-    if (want && this._point(want)) { this._fm.flyTo(this._point(want)); this._openPage("point", want); }
+    if (!want || !this._snap || !this._point(want) || (this._page?.kind === "point" && this._page.id === want)) return;
+    this._fm.flyTo(this._point(want)); this._openPage("point", want);
   }
 
   _renderTabs() {
@@ -2076,7 +2086,7 @@ class HamletFarmPanel extends HTMLElement {
       case "openpump": {
         const p = this._point(this._page?.id || this._sel);
         try { localStorage.setItem("hamlet_pump_entry", p.pump_entry); } catch (e) { /* ignore */ }
-        history.pushState(null, "", "/hamlet-pump"); window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+        history.pushState(null, "", `/hamlet-pump?back=${encodeURIComponent(`${location.pathname}?point=${p.id}`)}`); window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
         break;
       }
       case "addpoint": this._placing = true; this._draft = null; this._renderBanner(); this._renderSide(); break;
