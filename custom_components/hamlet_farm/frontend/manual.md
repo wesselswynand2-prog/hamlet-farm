@@ -23,7 +23,7 @@ Nothing on the map can be changed by accident – On / Off buttons need **two ta
 | {dot:offline} Grey, dashed | Offline – no signal. Often the Shelly / meter lost power or Wi-Fi |
 | {dot:info} White | Just a marker, nothing linked |
 
-**Lines:** {line:#5aaeff} water pipe · {line:#ff6a00} cable 1 000 V · {line:#c86bff} cable 3 300 V · {line:#ff2d55} MV cable · {line:#ffcc33} overhead power line · {line:#f2f2f2} fence · {line:#e0cfa6} road · {line:#8fd16a} land / camp · {line:#2f8fff} irrigation zone watering now (land turns blue).
+**Lines:** {line:#5aaeff} water pipe · {line:#c6ff00} cable 400 V · {line:#ff6a00} cable 1 000 V · {line:#c86bff} cable 3 300 V · {line:#ff2d55} MV cable · {line:#ffcc33} overhead power line · {line:#f2f2f2} fence · {line:#e0cfa6} road · {line:#8fd16a} land / camp · {line:#2f8fff} irrigation zone watering now (land turns blue).
 
 ## Moving around the map {icon:mdi:gesture-swipe}
 
@@ -143,7 +143,7 @@ Put your **company name** and **contact details** for the top of the printed rep
 ## Lines, cables and land {admin} {icon:mdi:vector-polyline}
 
 1. **Edit → Line / land.**
-2. Pick what you are drawing in the bar: water pipe, cable 1 000 V / 3 300 V / MV, overhead power line, fence, road, land / camp. The bar shows the length (or hectares) so far.
+2. Pick what you are drawing in the bar: water pipe, cable 400 V / 1 000 V / 3 300 V / MV, overhead power line, fence, road, land / camp. The bar shows the length (or hectares) so far.
 3. Tap along the route. **Undo** removes the last point.
 4. **Finish** → give it a name and **Details** (e.g. *95 mm² 4-core Cu SWA*). **Save.**
 

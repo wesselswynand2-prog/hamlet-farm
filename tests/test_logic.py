@@ -121,7 +121,7 @@ def test_transformer():
 
 
 def test_cable_kinds():
-    for k, n in (("cable", "Cable 1 000 V"), ("cable3300", "Cable 3 300 V"), ("mv", "MV cable")):
+    for k, n in (("cable400", "Cable 400 V"), ("cable", "Cable 1 000 V"), ("cable3300", "Cable 3 300 V"), ("mv", "MV cable")):
         s = logic.clean_shape({"kind": k, "info": "95 mm² 4-core Cu SWA", "coords": [[1, 2], [3, 4]]})
         assert s["name"] == n and s["info"] == "95 mm² 4-core Cu SWA"
 

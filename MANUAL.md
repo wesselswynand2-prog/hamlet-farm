@@ -24,7 +24,7 @@ Nothing on the map can be changed by accident – On / Off buttons need **two ta
 | ◌ Grey, dashed | Offline – no signal. Often the Shelly / meter lost power or Wi-Fi |
 | ⚪ White | Just a marker, nothing linked |
 
-**Lines:** ▬ water pipe · ▬ cable 1 000 V · ▬ cable 3 300 V · ▬ MV cable · ▬ overhead power line · ▬ fence · ▬ road · ▬ land / camp · ▬ irrigation zone watering now (land turns blue).
+**Lines:** ▬ water pipe · ▬ cable 400 V · ▬ cable 1 000 V · ▬ cable 3 300 V · ▬ MV cable · ▬ overhead power line · ▬ fence · ▬ road · ▬ land / camp · ▬ irrigation zone watering now (land turns blue).
 
 ## Moving around the map
 
@@ -144,7 +144,7 @@ Put your **company name** and **contact details** for the top of the printed rep
 ## Lines, cables and land (admin)
 
 1. **Edit → Line / land.**
-2. Pick what you are drawing in the bar: water pipe, cable 1 000 V / 3 300 V / MV, overhead power line, fence, road, land / camp. The bar shows the length (or hectares) so far.
+2. Pick what you are drawing in the bar: water pipe, cable 400 V / 1 000 V / 3 300 V / MV, overhead power line, fence, road, land / camp. The bar shows the length (or hectares) so far.
 3. Tap along the route. **Undo** removes the last point.
 4. **Finish** → give it a name and **Details** (e.g. *95 mm² 4-core Cu SWA*). **Save.**
 

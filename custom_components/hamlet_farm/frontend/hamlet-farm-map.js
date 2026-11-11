@@ -36,6 +36,7 @@ export const ROLES = {
 };
 export const SHAPES = {
   pipe: { label: "Water pipe", color: "#5aaeff", weight: 3, dash: null },
+  cable400: { label: "Cable 400 V", color: "#c6ff00", weight: 3, dash: "10 5", info: "e.g. 16 mm² 4-core Cu SWA" },
   cable: { label: "Cable 1 000 V", color: "#ff6a00", weight: 3, dash: "14 5 3 5", info: "e.g. 95 mm² 4-core Cu SWA" },
   cable3300: { label: "Cable 3 300 V", color: "#c86bff", weight: 3.5, dash: "14 4 3 4 3 4", info: "e.g. 50 mm² 3-core Cu SWA 3.3 kV" },
   mv: { label: "MV cable", color: "#ff2d55", weight: 4, dash: "18 5", info: "e.g. 11 kV 70 mm² 3-core XLPE" },

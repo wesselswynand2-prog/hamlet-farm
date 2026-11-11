@@ -27,7 +27,7 @@ POINT_TYPES: dict[str, tuple[str, str]] = {
     "building": ("Building", "mdi:home-outline"),
     "other": ("Other", "mdi:map-marker"),
 }
-SHAPE_KINDS = {"pipe": "Water pipe", "power": "Overhead power line", "cable": "Cable 1 000 V", "cable3300": "Cable 3 300 V",
+SHAPE_KINDS = {"pipe": "Water pipe", "cable400": "Cable 400 V", "power": "Overhead power line", "cable": "Cable 1 000 V", "cable3300": "Cable 3 300 V",
                "mv": "MV cable", "fence": "Fence", "road": "Road", "field": "Land / camp",
                "sketch": "Drawing", "sticky": "Sticky note"}
 SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500", "#000000")

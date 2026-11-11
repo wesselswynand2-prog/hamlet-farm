@@ -501,7 +501,7 @@ class HamletFarmPanel extends HTMLElement {
   _point(id) { return this._snap?.points.find((p) => p.id === id); }
 
   /* ------------------------------------------------------------ layers (what to show on the map, per browser) */
-  _layerOf(kind) { return ["cable", "cable3300", "mv"].includes(kind) ? "cables" : kind; }
+  _layerOf(kind) { return ["cable400", "cable", "cable3300", "mv"].includes(kind) ? "cables" : kind; }
   _shapeVisible(sh) {
     const L = this._layers || {};
     if (sh.hidden && !(this._isAdmin && L.planning)) return false;
@@ -520,7 +520,7 @@ class HamletFarmPanel extends HTMLElement {
       ${row("sticky", "Sticky notes", sw("#fff176"), n((x) => x.kind === "sticky" && !x.hidden))}
       ${row("sketch", "Drawings", sw("#ff3b30"), n((x) => x.kind === "sketch" && !x.hidden))}
       ${row("pipe", "Water pipes", sw("#5aaeff"), n((x) => x.kind === "pipe"))}
-      ${row("cables", "Cables (1 000 V / 3 300 V / MV)", sw("#ff6a00", true), n((x) => ["cable", "cable3300", "mv"].includes(x.kind)))}
+      ${row("cables", "Cables (400 V / 1 000 V / 3 300 V / MV)", sw("#ff6a00", true), n((x) => ["cable400", "cable", "cable3300", "mv"].includes(x.kind)))}
       ${row("power", "Overhead power lines", sw("#ffcc33", true), n((x) => x.kind === "power"))}
       ${row("fence", "Fences", sw("#f2f2f2", true), n((x) => x.kind === "fence"))}
       ${row("road", "Roads", sw("#e0cfa6"), n((x) => x.kind === "road"))}
