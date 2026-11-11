@@ -71,6 +71,7 @@ class FarmController:
         self.docs = [d for d in (data.get("docs") or []) if d.get("size")]   # drop uploads that never got their file
         self.services = list(data.get("services") or [])
         self.access = access_mod.clean_access(data.get("access"))
+        self.presence: dict[str, dict] = {}
         await self.hass.async_add_executor_job(notes_mod.clean_orphans, self.hass, self.entry.entry_id, self._photo_ids())
         self.offline = []
         for layer in data.get("offline") or []:
@@ -118,6 +119,28 @@ class FarmController:
         self._store.async_delay_save(self._data, 5)
 
     # ------------------------------------------------------------ listeners
+    # ------------------------------------------------------------------ who is on the app right now
+    def presence_join(self, key: str, user) -> None:
+        now = dt_util.now().isoformat()
+        self.presence[key] = {"key": key, "user_id": user.id if user else "", "name": (user.name if user else None) or "?",
+                              "since": now, "changed": now, "doing": "Opening the map"}
+        self._notify_listeners()
+
+    def presence_leave(self, key: str) -> None:
+        if self.presence.pop(key, None) is not None:
+            self._notify_listeners()
+
+    def presence_set(self, key: str, doing: str, busy: bool) -> None:
+        cur = self.presence.get(key)
+        doing = str(doing or "")[:120]
+        if cur is None or (cur["doing"] == doing and cur.get("busy") == busy):
+            return
+        cur.update(doing=doing, busy=bool(busy), changed=dt_util.now().isoformat())
+        self._notify_listeners()
+
+    def presence_list(self) -> list[dict]:
+        return sorted(self.presence.values(), key=lambda x: (not x.get("busy"), x["name"].lower(), x["since"]))
+
     def add_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
         self._listeners.append(cb)
 
@@ -715,6 +738,7 @@ class FarmController:
         perms = self.perms(user)
         snap["perms"] = perms
         if perms["admin"]:
+            snap["online"] = self.presence_list()     # admins: who is on the app now and what they're busy with
             return snap
         pts = [p for p in snap["points"] if not access_mod.point_hidden(perms, p)]
         ids = {p["id"] for p in pts}

@@ -446,3 +446,26 @@ async def test_users_and_access(hass: HomeAssistant, hass_ws_client, hass_read_o
     assert (await _reply(ro, 8))["error"]["code"] == "unauthorized"
     await ws.send_json({"id": 24, "type": f"{DOMAIN}/list"})
     assert len((await _reply(ws, 24))["result"]) == 1               # admins always see it
+
+
+async def test_who_is_on_the_app(hass: HomeAssistant, hass_ws_client, hass_read_only_access_token):
+    entry = await _setup(hass)
+    eid = entry.entry_id
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/subscribe", "entry_id": eid})
+    assert (await _reply(ws, 1))["success"]
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/subscribe", "entry_id": eid})
+    assert (await _reply(ro, 1))["success"]
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/presence", "entry_id": eid, "doing": "Writing a note on Borehole 1", "busy": True})
+    assert (await _reply(ro, 2))["success"]
+    await hass.async_block_till_done()
+    await ws.send_json({"id": 2, "type": f"{DOMAIN}/state", "entry_id": eid})
+    online = (await _reply(ws, 2))["result"]["online"]
+    assert len(online) == 2 and online[0]["busy"] and online[0]["doing"] == "Writing a note on Borehole 1"
+    await ro.send_json({"id": 3, "type": f"{DOMAIN}/state", "entry_id": eid})
+    assert "online" not in (await _reply(ro, 3))["result"]          # only admins see who is on
+    await ro.send_json({"id": 4, "type": "unsubscribe_events", "subscription": 1})
+    await _reply(ro, 4)
+    await ws.send_json({"id": 3, "type": f"{DOMAIN}/state", "entry_id": eid})
+    assert len((await _reply(ws, 3))["result"]["online"]) == 1

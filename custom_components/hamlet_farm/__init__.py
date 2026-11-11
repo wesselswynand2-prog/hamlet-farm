@@ -123,7 +123,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_delete_shapes, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
                     ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete, ws_search, ws_services, ws_service_save, ws_service_delete,
-                    ws_access_get, ws_access_save,
+                    ws_access_get, ws_access_save, ws_presence,
                     ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
 
@@ -154,9 +154,27 @@ def ws_subscribe(hass, connection, msg):
     def forward() -> None:
         connection.send_message(websocket_api.event_message(msg["id"], controller.snapshot_for(connection.user)))
 
-    connection.subscriptions[msg["id"]] = controller.add_listener(forward)
+    key = f"{id(connection)}:{msg['entry_id']}"
+    remove = controller.add_listener(forward)
+
+    @callback
+    def unsubscribe() -> None:
+        remove()
+        controller.presence_leave(key)
+
+    connection.subscriptions[msg["id"]] = unsubscribe
     connection.send_result(msg["id"])
-    forward()
+    controller.presence_join(key, connection.user)   # also sends the first snapshot
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/presence", vol.Required("entry_id"): str,
+                                  vol.Required("doing"): str, vol.Optional("busy", default=False): bool})
+@callback
+def ws_presence(hass, connection, msg):
+    """What this user is busy with (shown to admins, e.g. before restarting for an update)."""
+    if controller := _get(hass, connection, msg):
+        controller.presence_set(f"{id(connection)}:{msg['entry_id']}", msg["doing"], msg["busy"])
+        connection.send_result(msg["id"])
 
 
 def _edit(name: str, schema: dict, need: str = "edit"):

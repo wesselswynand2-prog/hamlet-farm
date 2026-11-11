@@ -163,6 +163,14 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 - **Temperature alert:** fill in *below* (e.g. 2 °C for frost) and/or *above*. The marker turns orange and, with alerts on, a notification is sent.
 - The **History** tab draws the temperature graph. Probes in °F are shown in °C.
 
+## Who is on the app {admin} {icon:mdi:account-multiple-outline}
+
+- Admins see a **people button** at the top (e.g. *3 · 1 busy*) and an **On the app now** card on the map's side panel.
+- It lists everyone who has the Farm map open right now and what they are doing – e.g. *Piet: Writing a service report – Borehole 1*.
+- **Busy** (orange) means they have unsaved work open: a point or line being edited, a note being typed, a service report or a quote. Wait for them to save before you restart Home Assistant for an update. The card tells you when it's safe.
+- *App in the background* means the page is open but not in use.
+- Only shows people on the Farm map (not the Pumps page or other dashboards).
+
 ## Users & access {admin} {icon:mdi:account-lock-outline}
 
 Settings → **Users & access** sets, per farm, what each Home Assistant user may see and do. Home Assistant **admins** always have full access.

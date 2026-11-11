@@ -318,7 +318,7 @@ class HamletFarmPanel extends HTMLElement {
   set route(v) { this._route = v; }
 
   connectedCallback() { if (this._hass && !this._unsub && this._entryId) this._subscribe(); }
-  disconnectedCallback() { this._unsubscribe(); }
+  disconnectedCallback() { this._unsubscribe(); clearInterval(this._presTimer); this._presTimer = null; }
   $(id) { return this.shadowRoot.getElementById(id); }
   _setHTML(el, html) { if (!el || el._html === html) return; el._html = html; el.innerHTML = html; }
 
@@ -327,6 +327,7 @@ class HamletFarmPanel extends HTMLElement {
     root.innerHTML = `<style>${STYLE}${HELP_CSS}${HISTORY_CSS}${SERVICE_CSS}</style><link rel="stylesheet" href="${BASE}leaflet/leaflet.css"><style>${MAP_CSS}</style>
       <div class="wrap">
         <div class="toolbar"><span id="menu"></span><div class="title">Farm map</div><div class="tabs" role="tablist"></div>
+          <button class="tbtn" id="onlinebtn" data-act="online" hidden title="Who is on the app now"><ha-icon icon="mdi:account-multiple-outline"></ha-icon><span id="onlinen"></span></button>
           <button class="tbtn" data-act="help" title="Manual and help"><ha-icon icon="mdi:help-circle-outline"></ha-icon>Help</button>
           <button class="tbtn" id="editbtn" data-act="edit" hidden aria-pressed="false"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button></div>
         <div class="body">
@@ -464,6 +465,53 @@ class HamletFarmPanel extends HTMLElement {
     try {
       this._unsub = await this._hass.connection.subscribeMessage((s) => this._apply(s), { type: `${DOMAIN}/subscribe`, entry_id: this._entryId });
     } catch (e) { console.warn("hamlet_farm subscribe failed", e); }
+    this._presLast = null;
+    if (!this._presTimer) this._presTimer = setInterval(() => this._presence(), 4000);
+    setTimeout(() => this._presence(), 500);
+  }
+
+  /** Tell the server what this user is busy with – admins see it under "On the app now" (e.g. before an update). */
+  _doing() {
+    const m = this._docModal; const pt = this._pageTarget();
+    const nm = (x) => x?.name || "a point";
+    if (document.hidden) return ["App in the background", false];
+    if (m?.svcForm) return [`Writing a service report${this._point(m.svcForm.point) ? ` – ${this._point(m.svcForm.point).name}` : ""}`, true];
+    if (m?.form) return ["Uploading a quote / document", true];
+    if (m?.access) return ["Changing users & access", true];
+    if (this._off) return ["Adding an offline farm photo", true];
+    if (this._draft) {
+      const d = this._draft;
+      if (d.kind === "shape") return [`${this._snap?.shapes.some((x) => x.id === d.id) ? "Editing" : "Adding"} ${d.shape_kind === "sticky" ? "a sticky note" : `${(SHAPES[d.shape_kind]?.label || "line").toLowerCase()}${d.name ? ` – ${d.name}` : ""}`}`, true];
+      return [`${this._point(d.id) ? "Editing" : "Adding"} point${d.name ? ` – ${d.name}` : ""}`, true];
+    }
+    if (this._draw || this._pen) return ["Drawing on the map", true];
+    const nt = this.$("nt");
+    if (pt && nt && nt.value.trim()) return [`Writing a note – ${nm(pt)}`, true];
+    if (this._noteFile || this._notePhoto) return [`Adding a photo / file – ${nm(pt)}`, true];
+    if (this._measure) return ["Measuring", false];
+    if (pt) return [`Looking at ${nm(pt)}`, false];
+    if (this._edit) return ["Edit mode (nothing open)", false];
+    return ["Viewing the map", false];
+  }
+
+  async _presence() {
+    if (!this._unsub || !this._entryId) return;
+    const [doing, busy] = this._doing();
+    const key = `${doing}|${busy}`; const now = Date.now();
+    if (key === this._presLast && now - (this._presAt || 0) < 60000) return;
+    this._presLast = key; this._presAt = now;
+    try { await this._hass.callWS({ type: `${DOMAIN}/presence`, entry_id: this._entryId, doing, busy }); } catch (e) { this._presLast = null; }
+  }
+
+  _onlineHtml() {
+    const on = this._snap?.online; if (!this._isAdmin || !on) return "";
+    const me = this._hass.user?.id;
+    const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - new Date(t)) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+    const busy = on.filter((x) => x.busy && x.user_id !== me).length;
+    return `<section class="card" id="online"><h2>On the app now<span class="sub">${on.length} open${busy ? ` · <b style="color:var(--c-warn);font-weight:500">${busy} busy</b>` : ""}</span></h2>
+      ${on.map((x) => `<div class="ev"><i style="background:${x.busy ? "var(--c-warn)" : "var(--c-ok)"}"></i>
+        <div><b style="font-weight:500">${esc(x.name)}${x.user_id === me ? " (you)" : ""}</b>: ${esc(x.doing)}<div class="when">${x.busy ? "busy for" : "on for"} ${ago(x.busy ? x.changed : x.since)}</div></div></div>`).join("")}
+      <div class="small muted" style="margin-top:8px">${busy ? "Someone has unsaved work open – wait before restarting Home Assistant for an update." : "Nobody has unsaved work open – safe to restart for an update."}</div></section>`;
   }
   _unsubscribe() { if (this._unsub) { this._unsub(); this._unsub = null; } }
 
@@ -471,6 +519,13 @@ class HamletFarmPanel extends HTMLElement {
     if (s.entry_id !== this._entryId) return;
     this._snap = s;
     if (s.perms && JSON.stringify(s.perms) !== JSON.stringify(this._perm)) this._setPerms(s.perms);
+    const ob = this.$("onlinebtn");
+    if (ob) {
+      const on = s.online || []; const busy = on.filter((x) => x.busy && x.user_id !== this._hass.user?.id).length;
+      ob.hidden = !this._isAdmin || !on.length;
+      this.$("onlinen").textContent = busy ? `${on.length} · ${busy} busy` : String(on.length);
+      ob.style.cssText = busy ? "background:#ff9800;border-color:#ff9800;color:#fff" : "";
+    }
     this.shadowRoot.querySelector(".toolbar .title").textContent = this._entries.length > 1 ? "Farm map" : s.name;
     const base = this._baseOverride || s.settings?.base || "satellite";
     this._fm.setBase(base);
@@ -650,6 +705,7 @@ class HamletFarmPanel extends HTMLElement {
         ${pts.length ? `<div class="chips" style="margin-bottom:8px">${chip("all", "All")}${sm.alerts ? chip("alerts", `Alerts (${sm.alerts})`, "mdi:alert-outline") : ""}${types.map((t) => chip(t, TYPES[t]?.label || t, ICON(t))).join("")}</div>` : ""}
         <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._canEdit ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is. <a href=\"#\" data-act=\"helpat\" data-topic=\"Setting up\">How to set up a farm</a>" : "No points on the map yet."}</div>`}</div>
       </section>
+      ${this._onlineHtml()}
       ${this._docsCardHtml()}
       ${evs.length ? `<section class="card"><h2>Alerts<span class="sub">last ${evs.length}</span></h2>
         ${evs.map((e) => `<div class="ev"><i style="background:${e.cls === "ok" ? "var(--c-ok)" : e.cls === "warn" ? "var(--c-warn)" : e.cls === "offline" ? "#8a8f96" : "var(--c-bad)"}"></i>
@@ -2091,6 +2147,11 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "docnew": this._newDoc(ds.docpoint); break;
       case "access": this._openAccess(); break;
+      case "online": {
+        if (this._page) this._closePage();
+        this._draft = null; this._sel = null; this._renderSide();
+        setTimeout(() => this.$("online")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); break;
+      }
       case "accsave": this._saveAccess(); break;
       case "docclose": this._closeDoc(); break;
       case "docsave": this._saveDoc(); break;
