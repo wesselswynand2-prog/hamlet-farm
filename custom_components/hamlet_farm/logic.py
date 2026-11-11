@@ -45,7 +45,7 @@ OFF_WORDS = {"off", "false", "closed", "closing", "idle", "stopped", "no", "inac
 SUPPLY_MIN_V = 150.0
 RUNNING_MIN_W = 20.0
 
-PUMP_WARN = {"Resting", "Tank low", "Rain skip", "Rain delay", "Waiting", "Leak?", "Short-cycling"}
+PUMP_WARN = {"Resting", "Tank low", "Rain skip", "Rain delay", "Waiting", "Leak?", "Short-cycling", "Load shed"}
 PUMP_BAD = {"Fault", "VFD fault", "Offline", "Locked out"}
 
 _ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
