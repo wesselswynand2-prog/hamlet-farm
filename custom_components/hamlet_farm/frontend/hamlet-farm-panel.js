@@ -414,7 +414,7 @@ class HamletFarmPanel extends HTMLElement {
     } catch (e) { /* storage blocked */ }
     this._layers.labels = this._labels;
     this._fm.shapeFilter = (sh) => this._shapeVisible(sh);
-    this._fm.setLabels(this._labels);
+    this._fm.setLabels(this._labels); this._fm.setAnimations(this._layers.anim !== false);
     await this._selectFarm(this._entries.some((e) => e.entry_id === saved) ? saved : this._entries[0].entry_id);
     this._openWanted();
     if (!this._locListener) {
@@ -585,6 +585,7 @@ class HamletFarmPanel extends HTMLElement {
     const planning = shapes.filter((x) => x.hidden);
     box.innerHTML = `<b>Show on the map</b>
       ${row("labels", "Names under points")}
+      ${row("anim", "Animate running pumps, pivots &amp; power")}
       ${row("sticky", "Sticky notes", sw("#fff176"), n((x) => x.kind === "sticky" && !x.hidden))}
       ${row("sketch", "Drawings", sw("#ff3b30"), n((x) => x.kind === "sketch" && !x.hidden))}
       ${row("pipe", "Water pipes", sw("#5aaeff"), n((x) => x.kind === "pipe"))}
@@ -600,7 +601,7 @@ class HamletFarmPanel extends HTMLElement {
   }
   _saveLayers() {
     try { localStorage.setItem("hamlet_farm_layers", JSON.stringify(this._layers)); localStorage.setItem("hamlet_farm_labels", this._layers.labels ? "1" : "0"); } catch (e) { /* ignore */ }
-    this._labels = this._layers.labels; this._fm.setLabels(this._labels);
+    this._labels = this._layers.labels; this._fm.setLabels(this._labels); this._fm.setAnimations(this._layers.anim !== false);
     this._fm.update(this._mapSnap());
     this._fm.setOffline(this._snap.offline, this._snap.tile_url, this._layers.photo !== false);
   }

@@ -164,6 +164,10 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 - **Temperature alert:** fill in *below* (e.g. 2 °C for frost) and/or *above*. The marker turns orange and, with alerts on, a notification is sent.
 - The **History** tab draws the temperature graph. Probes in °F are shown in °C.
 
+## Animations
+
+Running equipment moves on the map: **pumps** spray water drops, **pivots** spin a water ring, and **Eskom points / transformers** with power on glow and spark. When it stops, the animation stops. Switch them off under **Layers → Animate running pumps, pivots & power** (each phone or PC remembers its own choice). Phones set to *reduce motion* don't animate.
+
 ## Who is on the app (admin)
 
 - Admins see a **people button** at the top (e.g. *3 · 1 busy*) and an **On the app now** card on the map's side panel.

@@ -145,7 +145,28 @@ export const MAP_CSS = `
   background: #fff; color: var(--mc); font: 700 12px/16px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .hf-sel .hf-mk { transform: scale(1.25); box-shadow: 0 0 0 4px rgba(255,255,255,.55), 0 1px 8px rgba(0,0,0,.6); }
 @keyframes hf-ring { 0% { transform: scale(.85); opacity: .9; } 100% { transform: scale(1.6); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .hf-mk.run::after { animation: none; opacity: .6; } }
+/* running equipment animates: pumps drip water, pivots spin a spray ring, Eskom / transformers spark */
+.hf-anim { position: absolute; left: 50%; top: 17px; width: 0; height: 0; pointer-events: none; }
+.hf-drop { position: absolute; width: 8px; height: 11px; margin: -5px 0 0 -4px; background: #6fd3ff; border: 1px solid #fff;
+  border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%; box-shadow: 0 1px 3px rgba(0,0,0,.6); opacity: 0; animation: hf-drop 1.6s cubic-bezier(.3,0,.7,1) infinite; z-index: 2; }
+.hf-drop:nth-child(1) { --dx: -24px; --dy: 6px; animation-delay: 0s; }
+.hf-drop:nth-child(2) { --dx: 24px; --dy: 6px; animation-delay: .4s; }
+.hf-drop:nth-child(3) { --dx: -12px; --dy: 18px; animation-delay: .8s; }
+.hf-drop:nth-child(4) { --dx: 12px; --dy: 18px; animation-delay: 1.2s; }
+@keyframes hf-drop { 0% { transform: translate(0, 0) scale(.4); opacity: 0; } 20% { opacity: 1; }
+  60% { transform: translate(calc(var(--dx) * .8), calc(var(--dy) - 8px)) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), calc(var(--dy) + 8px)) scale(.9); opacity: 0; } }
+.hf-spin { position: absolute; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%;
+  border: 3px dotted #4fc3ff; border-top-color: transparent; animation: hf-spin 2.4s linear infinite; filter: drop-shadow(0 0 2px rgba(0,0,0,.5)); }
+@keyframes hf-spin { to { transform: rotate(360deg); } }
+.hf-zap { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
+  box-shadow: 0 0 10px 3px rgba(255,214,0,.75); animation: hf-zap 2.6s ease-in-out infinite; }
+.hf-mk.zap ha-icon { animation: hf-flick 2.6s steps(1) infinite; }
+@keyframes hf-zap { 0%, 100% { opacity: .25; transform: scale(.9); } 45% { opacity: .9; transform: scale(1.05); } 50% { opacity: .3; } 55% { opacity: 1; transform: scale(1.1); } }
+@keyframes hf-flick { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 3px #ffd600) brightness(1.4); } 54% { filter: none; } 56% { filter: drop-shadow(0 0 4px #ffd600) brightness(1.5); } }
+.hf-noanim .hf-anim { display: none; }
+.hf-noanim .hf-mk.zap ha-icon { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hf-mk.run::after { animation: none; opacity: .6; } .hf-anim { display: none; } .hf-mk.zap ha-icon { animation: none; } }
 .hf-lbl { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 500; color: #fff;
   text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000; pointer-events: none; text-align: center; line-height: 1.25; }
 .hf-lbl small { display: block; font-size: 11px; font-weight: 400; opacity: .95; }
@@ -228,6 +249,7 @@ export class FarmMap {
   }
 
   setLabels(on) { this.container.classList.toggle("hf-nolabels", !on); }
+  setAnimations(on) { this.container.classList.toggle("hf-noanim", !on); }
 
   setView(view, points, shapes = [], home = null) {
     if (view) { this.map.setView([view.lat, view.lng], view.zoom); return; }
@@ -264,7 +286,13 @@ export class FarmMap {
     const cls = st?.cls || "info";
     const val = shortValue(p, st);
     const col = pointColor(p, cls); const custom = col !== clsColor(cls, p.type);
-    return `<div class="hf-mk ${custom ? "custom" : cls}" style="--mc:${col};${custom ? `color:${inkOn(col)}` : ""}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></div>
+    const t = p.type;
+    const on = cls === "run" || (cls === "on" && (t === "eskom" || t === "transformer"));
+    const anim = !on ? "" : ["pump", "booster", "irrigation"].includes(t) ? `<div class="hf-anim"><i class="hf-drop"></i><i class="hf-drop"></i><i class="hf-drop"></i><i class="hf-drop"></i></div>`
+      : t === "pivot" ? `<div class="hf-anim"><i class="hf-spin"></i></div>`
+      : t === "eskom" || t === "transformer" ? `<div class="hf-anim"><i class="hf-zap"></i></div>` : "";
+    const zap = anim && (t === "eskom" || t === "transformer") ? " zap" : "";
+    return `${anim.includes("hf-zap") || anim.includes("hf-spin") ? anim : ""}<div class="hf-mk ${custom ? `custom${cls === "run" ? " run" : ""}` : cls}${zap}" style="--mc:${col};${custom ? `color:${inkOn(col)}` : ""}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></div>${anim.includes("hf-drop") ? anim : ""}
       <div class="hf-lbl">${esc(p.name)}${val ? `<small>${esc(val)}</small>` : ""}</div>`;
   }
 
