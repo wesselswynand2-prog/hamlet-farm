@@ -105,10 +105,14 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 
 # ------------------------------------------------------------------ websocket
-def _get(hass: HomeAssistant, connection, msg) -> FarmController | None:
+def _get(hass: HomeAssistant, connection, msg, need: str = "view") -> FarmController | None:
+    """The farm, if this user may <need> on it (view / edit / log / control / services_edit / admin)."""
     controller = _controllers(hass).get(msg["entry_id"])
     if controller is None:
         connection.send_error(msg["id"], "not_found", "Farm not found")
+    elif not controller.can(connection.user, "view") or not controller.can(connection.user, need):
+        connection.send_error(msg["id"], "unauthorized", "You don't have access to do that on this farm – ask the admin")
+        return None
     return controller
 
 
@@ -119,6 +123,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
     for handler in (ws_list, ws_state, ws_subscribe, ws_save_point, ws_delete_point, ws_save_shape,
                     ws_delete_shape, ws_delete_shapes, ws_save_view, ws_save_settings, ws_offline_create, ws_offline_finish,
                     ws_offline_visible, ws_offline_delete, ws_notes, ws_note_add, ws_note_delete, ws_search, ws_services, ws_service_save, ws_service_delete,
+                    ws_access_get, ws_access_save,
                     ws_docs, ws_doc_users, ws_doc_create, ws_doc_update, ws_doc_delete, ws_doc_respond):
         websocket_api.async_register_command(hass, handler)
 
@@ -126,7 +131,8 @@ def _register_websocket(hass: HomeAssistant) -> None:
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list"})
 @callback
 def ws_list(hass, connection, msg):
-    connection.send_result(msg["id"], [{"entry_id": c.entry.entry_id, "name": c.name} for c in _controllers(hass).values()])
+    connection.send_result(msg["id"], [{"entry_id": c.entry.entry_id, "name": c.name} for c in _controllers(hass).values()
+                                       if c.can(connection.user, "view")])
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/state", vol.Required("entry_id"): str})
@@ -153,21 +159,20 @@ def ws_subscribe(hass, connection, msg):
     forward()
 
 
-def _edit(name: str, schema: dict):
-    """Admin-only edit command: calls controller.<name>(value) and returns the new snapshot."""
+def _edit(name: str, schema: dict, need: str = "edit"):
+    """Edit command for users who may <need> (edit = map editors, admin = HA admins): calls controller.<name>(value)."""
     key = next(iter(k for k in schema if str(k) not in ("type", "entry_id")))
 
-    @websocket_api.require_admin
     @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/{name}", vol.Required("entry_id"): str, **schema})
     @callback
     def handler(hass, connection, msg):
-        if controller := _get(hass, connection, msg):
+        if controller := _get(hass, connection, msg, need):
             try:
                 result = getattr(controller, name)(msg[str(key)])
             except (ValueError, KeyError, TypeError) as err:
                 connection.send_error(msg["id"], "invalid", str(err))
                 return
-            connection.send_result(msg["id"], {"result": result, **controller.snapshot()})
+            connection.send_result(msg["id"], {"result": result, **controller.snapshot_for(connection.user)})
 
     handler.__name__ = f"ws_{name}"
     return handler
@@ -179,10 +184,22 @@ ws_save_shape = _edit("save_shape", {vol.Required("shape"): dict})
 ws_delete_shape = _edit("delete_shape", {vol.Required("shape_id"): str})
 ws_delete_shapes = _edit("delete_shapes", {vol.Required("shape_ids"): [str]})
 ws_save_view = _edit("save_view", {vol.Required("view"): dict})
-ws_save_settings = _edit("save_settings", {vol.Required("settings"): dict})
-ws_offline_create = _edit("offline_create", {vol.Required("layer"): dict})
-ws_offline_finish = _edit("offline_finish", {vol.Required("layer_id"): str})
-ws_offline_visible = _edit("offline_visible", {vol.Required("layer"): dict})
+ws_save_settings = _edit("save_settings", {vol.Required("settings"): dict}, "admin")
+ws_offline_create = _edit("offline_create", {vol.Required("layer"): dict}, "admin")
+ws_offline_finish = _edit("offline_finish", {vol.Required("layer_id"): str}, "admin")
+ws_offline_visible = _edit("offline_visible", {vol.Required("layer"): dict}, "admin")
+ws_access_save = _edit("access_save", {vol.Required("access"): dict}, "admin")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/access_get", vol.Required("entry_id"): str})
+@websocket_api.async_response
+async def ws_access_get(hass, connection, msg):
+    """Admin: the farm's access rules plus every Home Assistant user (for the Users & access screen)."""
+    if controller := _get(hass, connection, msg, "admin"):
+        users = await hass.auth.async_get_users()
+        connection.send_result(msg["id"], {"access": controller.access, "users": [
+            {"id": u.id, "name": u.name or "?", "admin": u.is_admin} for u in users if u.is_active and not u.system_generated]})
 
 
 @websocket_api.require_admin
@@ -204,8 +221,10 @@ async def ws_offline_delete(hass, connection, msg):
 @callback
 def ws_notes(hass, connection, msg):
     if controller := _get(hass, connection, msg):
-        connection.send_result(msg["id"], {"notes": controller.notes_for(msg["target"]), "user_id": connection.user.id,
-                                           "is_admin": connection.user.is_admin})
+        perms = controller.perms(connection.user)
+        notes = [] if "log" in perms["hide"] else controller.notes_for(msg["target"])
+        connection.send_result(msg["id"], {"notes": notes, "user_id": connection.user.id, "is_admin": connection.user.is_admin,
+                                           "can_add": perms["log"]})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/note_add", vol.Required("entry_id"): str, vol.Required("target"): str,
@@ -213,7 +232,7 @@ def ws_notes(hass, connection, msg):
                                   vol.Optional("file"): vol.Any(dict, None)})
 @callback
 def ws_note_add(hass, connection, msg):
-    if controller := _get(hass, connection, msg):
+    if controller := _get(hass, connection, msg, "log"):
         try:
             note = controller.note_add(msg["target"], msg["text"], connection.user, msg.get("photo"), msg.get("file"))
         except ValueError as err:
@@ -246,10 +265,11 @@ def ws_docs(hass, connection, msg):
         connection.send_result(msg["id"], {"docs": controller.docs_for(connection.user), "is_admin": connection.user.is_admin})
 
 
-@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/doc_users", vol.Required("entry_id"): str})
 @websocket_api.async_response
 async def ws_doc_users(hass, connection, msg):
+    if not connection.user.is_admin and _get(hass, connection, msg, "services_edit") is None:
+        return
     users = await hass.auth.async_get_users()
     connection.send_result(msg["id"], [{"id": u.id, "name": u.name or "?", "admin": u.is_admin}
                                        for u in users if u.is_active and not u.system_generated])
@@ -319,14 +339,14 @@ def ws_search(hass, connection, msg):
 @callback
 def ws_services(hass, connection, msg):
     if controller := _get(hass, connection, msg):
-        connection.send_result(msg["id"], {"services": controller.services_for(connection.user, msg.get("point")), "is_admin": connection.user.is_admin})
+        connection.send_result(msg["id"], {"services": controller.services_for(connection.user, msg.get("point")), "is_admin": connection.user.is_admin,
+                                           "can_edit": controller.can(connection.user, "services_edit")})
 
 
-@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/service_save", vol.Required("entry_id"): str, vol.Required("report"): dict})
 @callback
 def ws_service_save(hass, connection, msg):
-    if controller := _get(hass, connection, msg):
+    if controller := _get(hass, connection, msg, "services_edit"):
         try:
             rep = controller.service_save(msg["report"], connection.user)
         except ValueError as err:
@@ -335,11 +355,10 @@ def ws_service_save(hass, connection, msg):
         connection.send_result(msg["id"], {"report": rep, "services": controller.services_for(connection.user, rep["point"])})
 
 
-@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/service_delete", vol.Required("entry_id"): str, vol.Required("report_id"): str})
 @callback
 def ws_service_delete(hass, connection, msg):
-    if controller := _get(hass, connection, msg):
+    if controller := _get(hass, connection, msg, "services_edit"):
         try:
             controller.service_delete(msg["report_id"])
         except ValueError as err:

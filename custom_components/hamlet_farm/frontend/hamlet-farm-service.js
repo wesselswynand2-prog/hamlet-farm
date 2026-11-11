@@ -96,7 +96,7 @@ export function serviceTabHtml(p, list, isAdmin, summary) {
     const t = reportTotals(r);
     return `<button class="doc" data-svc="${esc(r.id)}"><ha-icon icon="mdi:wrench-outline"></ha-icon>
       <span class="nm"><div>${esc(r.title)}</div><div class="small">${esc(dateLong(r.date))}${r.tech ? ` · ${esc(r.tech)}` : ""}${r.ref ? ` · ${esc(r.ref)}` : ""}</div></span>
-      ${r.items?.length ? `<span class="small" style="font-variant-numeric:tabular-nums">${money(t.total)}</span>` : ""}</button>`;
+      ${r.items?.length && !r.prices_hidden ? `<span class="small" style="font-variant-numeric:tabular-nums">${money(t.total)}</span>` : ""}</button>`;
   }).join("");
   return `<section class="card">
       <h2>Service reports<span class="sub">${isAdmin ? `<button class="btn primary" data-act="svcnew" style="padding:5px 12px"><ha-icon icon="mdi:plus"></ha-icon>New report</button>` : ""}</span></h2>
@@ -125,6 +125,10 @@ export function serviceViewHtml(r, p, isAdmin, users, confirmDel) {
     <div class="err" id="derr"></div>`;
 
   function itemsTable(rep) {
+    if (rep.prices_hidden) {   // this user may see the work and parts, not the prices
+      return `<table class="svct"><thead><tr><th>Description</th><th class="r">Qty</th></tr></thead><tbody>
+      ${rep.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="r">${esc(it.qty)}</td></tr>`).join("")}</tbody></table>`;
+    }
     return `<table class="svct"><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead><tbody>
       ${rep.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="r">${esc(it.qty)}</td><td class="r">${money(it.price)}</td><td class="r">${money(it.qty * it.price)}</td></tr>`).join("")}
       </tbody><tfoot><tr><td colspan="3" class="r">Subtotal</td><td class="r">${money(t.sub)}</td></tr>
@@ -215,7 +219,9 @@ export function printReport(r, p, farm, settings) {
     ${inst.length ? `<h2>Installation</h2><div class="grid">${inst.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}</div>` : ""}
     <h2>${esc(r.title)}</h2>${r.work ? `<div class="pre">${esc(r.work)}</div>` : ""}
     ${r.readings ? `<h2>Readings</h2><div class="pre">${esc(r.readings)}</div>` : ""}
-    ${r.items?.length ? `<h2>Parts &amp; labour</h2><table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead><tbody>
+    ${r.items?.length && r.prices_hidden ? `<h2>Parts &amp; labour</h2><table><thead><tr><th>Description</th><th class="r">Qty</th></tr></thead><tbody>
+      ${r.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="r">${esc(it.qty)}</td></tr>`).join("")}</tbody></table>` : ""}
+    ${r.items?.length && !r.prices_hidden ? `<h2>Parts &amp; labour</h2><table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr></thead><tbody>
       ${r.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="r">${esc(it.qty)}</td><td class="r">${money(it.price)}</td><td class="r">${money(it.qty * it.price)}</td></tr>`).join("")}</tbody>
       <tfoot><tr><td colspan="3" class="r">Subtotal</td><td class="r">${money(t.sub)}</td></tr>${r.vat ? `<tr><td colspan="3" class="r">VAT 15%</td><td class="r">${money(t.vat)}</td></tr>` : ""}
       <tr class="tot"><td colspan="3" class="r">Total</td><td class="r">${money(t.total)}</td></tr></tfoot></table>` : ""}

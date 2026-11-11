@@ -17,7 +17,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import docs as docs_mod, logic, notes as notes_mod, offline
+from . import access as access_mod, docs as docs_mod, logic, notes as notes_mod, offline
 from .const import CONF_NAME, DOMAIN, MAX_EVENTS, PUSH_DEBOUNCE_S, SIGNAL_UPDATE, STORE_VERSION, TICK_S
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ class FarmController:
         self.notes = {k: v for k, v in (data.get("notes") or {}).items() if isinstance(v, list)}
         self.docs = [d for d in (data.get("docs") or []) if d.get("size")]   # drop uploads that never got their file
         self.services = list(data.get("services") or [])
+        self.access = access_mod.clean_access(data.get("access"))
         await self.hass.async_add_executor_job(notes_mod.clean_orphans, self.hass, self.entry.entry_id, self._photo_ids())
         self.offline = []
         for layer in data.get("offline") or []:
@@ -110,6 +111,7 @@ class FarmController:
             "points": self.points, "shapes": self.shapes, "view": self.view, "settings": self.settings,
             "events": self.events[-MAX_EVENTS:], "energy_base": self.energy_base, "alerted": sorted(self._alerted),
             "tile_token": self.tile_token, "offline": self.offline, "notes": self.notes, "docs": self.docs, "services": self.services,
+            "access": self.access,
         }
 
     def _save(self) -> None:
@@ -401,10 +403,18 @@ class FarmController:
 
     # ------------------------------------------------------------ service reports
     def services_for(self, user, point: str | None = None) -> list[dict]:
+        perms = self.perms(user)
+        if "services" in perms["hide"] or perms["role"] == "none":
+            return []
         admin = bool(user and user.is_admin)
-        out = [r for r in self.services if (admin or (user and user.id in r.get("users", []))) and (point is None or r.get("point") == point)]
-        if not admin:
+        every = admin or perms["services_edit"]          # technicians who write reports see them all
+        seen = {p["id"] for p in self.points if not access_mod.point_hidden(perms, p)}
+        out = [r for r in self.services if (every or (user and user.id in r.get("users", [])))
+               and r.get("point") in seen and (point is None or r.get("point") == point)]
+        if not every:
             out = [{k: v for k, v in r.items() if k != "users"} for r in out]
+        if "prices" in perms["hide"]:
+            out = [access_mod.strip_prices(r) for r in out]
         return sorted(out, key=lambda r: (r.get("date") or "", r.get("created") or ""), reverse=True)
 
     def service_summary(self) -> dict:
@@ -562,7 +572,11 @@ class FarmController:
         words = [w for w in str(q or "").lower().split() if w][:6]
         if not words:
             return []
-        hidden = set() if (user and user.is_admin) else {s["id"] for s in self.shapes if s.get("hidden")}
+        perms = self.perms(user)
+        if "log" in perms["hide"] or perms["role"] == "none":
+            return []
+        hidden = {s["id"] for s in self.shapes if access_mod.shape_hidden(perms, s)}
+        hidden |= {p["id"] for p in self.points if access_mod.point_hidden(perms, p)}
         kinds = {p["id"]: ("point", p["name"]) for p in self.points}
         kinds.update({s["id"]: ("shape", s["name"]) for s in self.shapes})
         hits = []
@@ -675,11 +689,48 @@ class FarmController:
         await self.hass.async_add_executor_job(offline.remove_tree, offline.layer_dir(self.hass, self.entry.entry_id, layer_id))
 
     # ------------------------------------------------------------ snapshot
+    # ------------------------------------------------------------------ access (who sees / does what)
+    def perms(self, user) -> dict:
+        return access_mod.perms_for(self.access, user)
+
+    def can(self, user, what: str) -> bool:
+        p = self.perms(user)
+        if what == "admin":
+            return p["admin"]
+        if what == "edit":
+            return p["role"] == "edit"
+        if what == "view":
+            return p["role"] != "none"
+        return bool(p.get(what)) and p["role"] != "none"
+
+    def access_save(self, raw: dict) -> dict:
+        self.access = access_mod.clean_access(raw)
+        self._save()
+        self._notify_listeners()
+        return self.access
+
     def snapshot_for(self, user) -> dict:
-        """Snapshot for one user: planning (hidden) lines only go to admins."""
+        """Snapshot for one user: what their access rule lets them see (planning lines: editors only)."""
         snap = self.snapshot()
-        if not (user and user.is_admin):
-            snap["shapes"] = [s for s in snap["shapes"] if not s.get("hidden")]
+        perms = self.perms(user)
+        snap["perms"] = perms
+        if perms["admin"]:
+            return snap
+        pts = [p for p in snap["points"] if not access_mod.point_hidden(perms, p)]
+        ids = {p["id"] for p in pts}
+        snap["points"] = pts
+        snap["shapes"] = [s for s in snap["shapes"] if not access_mod.shape_hidden(perms, s)]
+        ids |= {s["id"] for s in snap["shapes"]}
+        snap["statuses"] = {k: v for k, v in snap["statuses"].items() if k in ids}
+        snap["watering"] = {k: v for k, v in (snap.get("watering") or {}).items() if k in ids and v.get("point") in ids}
+        snap["events"] = [e for e in snap["events"] if not e.get("point") or e.get("point") in ids]
+        snap["note_counts"] = {} if "log" in perms["hide"] else {k: v for k, v in snap["note_counts"].items() if k in ids}
+        if "services" in perms["hide"]:
+            snap["service"] = {}
+        elif isinstance(snap.get("service"), dict):
+            snap["service"] = {k: v for k, v in snap["service"].items() if k in ids}
+        if len(pts) != len(self.points):
+            snap["summary"] = logic.summary(pts, snap["statuses"])
         return snap
 
     def snapshot(self) -> dict:

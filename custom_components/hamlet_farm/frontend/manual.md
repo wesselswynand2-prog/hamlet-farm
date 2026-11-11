@@ -163,6 +163,19 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 - **Temperature alert:** fill in *below* (e.g. 2 °C for frost) and/or *above*. The marker turns orange and, with alerts on, a notification is sent.
 - The **History** tab draws the temperature graph. Probes in °F are shown in °C.
 
+## Users & access {admin} {icon:mdi:account-lock-outline}
+
+Settings → **Users & access** sets, per farm, what each Home Assistant user may see and do. Home Assistant **admins** always have full access.
+
+- **Everyone else** is the rule for every user without their own rule – also for users you add later. Tick **Own rule** next to a person to give them their own.
+- **Can:** *No access* (the farm disappears for them), *View the map*, or *View and edit the map* – points, lines, land, sticky notes and planning items. Settings, offline photos, quotes and this screen stay admin only.
+- **Switch pumps & equipment:** shows the On / Off / Auto buttons and the pump controller on the map.
+- **Add notes, photos & files** to the site log.
+- **Write service reports** – they also see every report.
+- **Hide from them:** *Electrical* (Eskom points, transformers, solar, generators, cables, power lines), *Water* (pumps, pivots, irrigation, tanks, valves, pipes), *Service reports*, *Prices* (they see the work and parts, not the money), *History graphs* and the *Site log*.
+- Changes apply straight away. The server enforces them – hidden things are never sent to that user's phone.
+- *Switch pumps* only hides the buttons on the farm map: someone who also has a normal dashboard with that switch on it can still use it there.
+
 ## Sticky notes {admin} {icon:mdi:note-text-outline}
 
 - **Edit → Sticky note**, then tap the map where it goes. Write the note, pick a colour and tap **Save**.

@@ -84,8 +84,11 @@ class PhotoUploadView(HomeAssistantView):
 
     async def post(self, request: web.Request, entry_id: str) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        if _farm(hass, entry_id) is None:
+        farm = _farm(hass, entry_id)
+        if farm is None:
             return self.json_message("Farm not found", 404)
+        if not farm.can(request.get("hass_user"), "log"):
+            return self.json_message("You can't add to the site log on this farm", 403)
         data = await request.read()
         if len(data) > MAX_PHOTO_BYTES:
             return self.json_message("Photo too big", 413)
@@ -138,8 +141,11 @@ class FileView(HomeAssistantView):
 
     async def post(self, request: web.Request, entry_id: str, file_id: str) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        if _farm(hass, entry_id) is None or file_id != "new":
+        farm = _farm(hass, entry_id)
+        if farm is None or file_id != "new":
             return self.json_message("Not found", 404)
+        if not farm.can(request.get("hass_user"), "log"):
+            return self.json_message("You can't add to the site log on this farm", 403)
         data = await request.read()
         if len(data) > MAX_FILE_BYTES:
             return self.json_message("File too big (15 MB max)", 413)
@@ -165,6 +171,9 @@ class FileView(HomeAssistantView):
         meta = c.file_meta(file_id) if c else None
         if meta is None:
             return web.Response(status=404)
+        perms = c.perms(request.get("hass_user"))
+        if perms["role"] == "none" or "log" in perms["hide"]:
+            return web.Response(status=403)
         try:
             path = file_path(hass, entry_id, file_id)
         except ValueError:

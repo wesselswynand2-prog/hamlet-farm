@@ -301,7 +301,7 @@ class HamletFarmPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._entries = []; this._entryId = null; this._snap = null; this._sel = null; this._edit = false;
     this._draft = null; this._draw = null; this._filter = "all"; this._labels = true; this._unsub = null; this._confirm = null;
-    this._pumps = []; this._isAdmin = false; this._baseOverride = null;
+    this._pumps = []; this._isAdmin = false; this._setPerms(null); this._baseOverride = null;
   }
   set hass(hass) {
     const first = !this._hass;
@@ -391,7 +391,9 @@ class HamletFarmPanel extends HTMLElement {
       return;
     }
     if (!this._entries.length) {
-      this.$("side").innerHTML = `<div class="card loading">No farm set up yet. Go to Settings → Devices &amp; services → Add integration → Hamlet Farm.</div>`;
+      this.$("side").innerHTML = this._hass.user?.is_admin
+        ? `<div class="card loading">No farm set up yet. Go to Settings → Devices &amp; services → Add integration → Hamlet Farm.</div>`
+        : `<div class="card loading">You don't have access to a farm map yet – ask the admin.</div>`;
       return;
     }
     let L;
@@ -421,6 +423,16 @@ class HamletFarmPanel extends HTMLElement {
     }
   }
 
+  /** What this user may do on this farm (from the server – it also enforces it). */
+  _setPerms(p) {
+    const admin = !!this._isAdmin;
+    this._perm = p || { admin, role: admin ? "edit" : "view", log: true, control: true, services_edit: admin, hide: [] };
+    this._canEdit = this._perm.role === "edit";
+    this._canSvc = admin || !!this._perm.services_edit;
+    const eb = this.$("editbtn"); if (eb) eb.hidden = !this._canEdit;
+  }
+  _hides(what) { return (this._perm?.hide || []).includes(what); }
+
   _openWanted() {
     const want = new URLSearchParams(location.search).get("point");
     if (!want || !this._snap || !this._point(want) || (this._page?.kind === "point" && this._page.id === want)) return;
@@ -441,7 +453,7 @@ class HamletFarmPanel extends HTMLElement {
     try {
       const s = await this._hass.callWS({ type: `${DOMAIN}/state`, entry_id: id });
       this._isAdmin = s.is_admin; this._pumps = s.pumps || [];
-      this.$("editbtn").hidden = !this._isAdmin;
+      this._setPerms(s.perms);
       this._apply(s);
     } catch (e) { this.$("side").innerHTML = `<div class="card loading">${esc(e.message)}</div>`; return; }
     this._subscribe();
@@ -458,6 +470,7 @@ class HamletFarmPanel extends HTMLElement {
   _apply(s) {
     if (s.entry_id !== this._entryId) return;
     this._snap = s;
+    if (s.perms && JSON.stringify(s.perms) !== JSON.stringify(this._perm)) this._setPerms(s.perms);
     this.shadowRoot.querySelector(".toolbar .title").textContent = this._entries.length > 1 ? "Farm map" : s.name;
     const base = this._baseOverride || s.settings?.base || "satellite";
     this._fm.setBase(base);
@@ -504,7 +517,7 @@ class HamletFarmPanel extends HTMLElement {
   _layerOf(kind) { return ["cable400", "cable", "cable3300", "mv"].includes(kind) ? "cables" : kind; }
   _shapeVisible(sh) {
     const L = this._layers || {};
-    if (sh.hidden && !(this._isAdmin && L.planning)) return false;
+    if (sh.hidden && !(this._canEdit && L.planning)) return false;
     return L[this._layerOf(sh.kind)] !== false;
   }
   _renderLayers() {
@@ -526,7 +539,7 @@ class HamletFarmPanel extends HTMLElement {
       ${row("road", "Roads", sw("#e0cfa6"), n((x) => x.kind === "road"))}
       ${row("field", "Land / camps", sw("#8fd16a"), n((x) => x.kind === "field"))}
       ${(this._snap?.offline || []).length ? row("photo", "Offline farm photo") : ""}
-      ${this._isAdmin ? `<div class="sep"></div>${row("planning", "Planning lines & notes (hidden)", sw("#ffffff", true), planning.length)}
+      ${this._canEdit ? `<div class="sep"></div>${row("planning", "Planning lines & notes (hidden)", sw("#ffffff", true), planning.length)}
         <div style="font-size:12px;opacity:.7">Only admins can show these. Clients never see them.</div>
         ${drawings.length ? `<button class="btn" data-act="deldrawings" style="${this._confirm === "deldrawings" ? "background:#db4437;border-color:#db4437" : ""}"><ha-icon icon="mdi:delete-sweep-outline"></ha-icon>${this._confirm === "deldrawings" ? "Tap again – delete all drawings" : `Delete all drawings (${drawings.length})`}</button>` : ""}` : ""}`;
   }
@@ -559,7 +572,7 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="mundo" ${c.length ? "" : "disabled"}>Undo</button>
         <button class="btn" data-act="mclose" ${c.length > 2 ? "" : "disabled"} aria-pressed="${m.closed}">${m.closed ? "Line" : "Area"}</button>
         <button class="btn" data-act="mclear" ${c.length ? "" : "disabled"}>Clear</button>
-        ${this._isAdmin && c.length > 1 ? `<button class="btn" data-act="msave">Save as line</button>` : ""}
+        ${this._canEdit && c.length > 1 ? `<button class="btn" data-act="msave">Save as line</button>` : ""}
         <button class="btn" data-act="helpat" data-topic="Measuring" aria-label="Help">?</button>
         <button class="btn primary" data-act="measure">Done</button></div>`;
     } else if (this._pen) {
@@ -635,7 +648,7 @@ class HamletFarmPanel extends HTMLElement {
       <section class="card">
         <h2>Points</h2>
         ${pts.length ? `<div class="chips" style="margin-bottom:8px">${chip("all", "All")}${sm.alerts ? chip("alerts", `Alerts (${sm.alerts})`, "mdi:alert-outline") : ""}${types.map((t) => chip(t, TYPES[t]?.label || t, ICON(t))).join("")}</div>` : ""}
-        <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._isAdmin ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is. <a href=\"#\" data-act=\"helpat\" data-topic=\"Setting up\">How to set up a farm</a>" : "No points on the map yet."}</div>`}</div>
+        <div class="list">${shown.map((p) => this._rowHtml(p)).join("") || `<div class="empty">${pts.length ? "Nothing here." : this._canEdit ? "No points yet – tap <b>Edit</b>, then <b>Point</b>, and tap the map where a pump, pivot or Eskom point is. <a href=\"#\" data-act=\"helpat\" data-topic=\"Setting up\">How to set up a farm</a>" : "No points on the map yet."}</div>`}</div>
       </section>
       ${this._docsCardHtml()}
       ${evs.length ? `<section class="card"><h2>Alerts<span class="sub">last ${evs.length}</span></h2>
@@ -654,7 +667,8 @@ class HamletFarmPanel extends HTMLElement {
             <select id="s_base" style="width:auto">${["satellite", "hybrid", "map"].map((b) => `<option value="${b}" ${ss.base === b ? "selected" : ""}>${b[0].toUpperCase() + b.slice(1)}</option>`).join("")}</select></div>
         </div>
         <datalist id="dl-notify">${Object.keys(this._hass.services?.notify || {}).map((k) => `<option value="notify.${esc(k)}"></option>`).join("")}</datalist>
-        <div class="actions"><button class="btn primary" data-act="savesettings">Save</button></div><div class="err" id="serr"></div></section>` : ""}
+        <div class="actions"><button class="btn primary" data-act="savesettings">Save</button>
+          <button class="btn" data-act="access" style="margin-left:auto"><ha-icon icon="mdi:account-lock-outline"></ha-icon>Users &amp; access</button></div><div class="err" id="serr"></div></section>` : ""}
       ${this._isAdmin ? this._offlineListHtml() : ""}`);
   }
 
@@ -854,7 +868,7 @@ class HamletFarmPanel extends HTMLElement {
       if (e.startsWith("camera.")) { if (so?.attributes?.entity_picture) cams.push(`<img class="cam" alt="${name}" src="${esc(so.attributes.entity_picture)}&t=${Math.floor(Date.now() / 10000)}">`); continue; }
       const dom = e.split(".")[0];
       const val = so ? `${esc(H.formatEntityState ? H.formatEntityState(so) : `${so.state} ${so.attributes.unit_of_measurement || ""}`)}` : `<span class="muted">not found</span>`;
-      const tog = ["switch", "input_boolean", "light"].includes(dom) && so ? ` <button class="btn" style="padding:2px 10px" data-toggle="${esc(e)}">${so.state === "on" ? "Turn off" : "Turn on"}</button>` : "";
+      const tog = ["switch", "input_boolean", "light"].includes(dom) && so && this._perm.control ? ` <button class="btn" style="padding:2px 10px" data-toggle="${esc(e)}">${so.state === "on" ? "Turn off" : "Turn on"}</button>` : "";
       rows.push(`<div class="kv erow" data-more="${esc(e)}"><span class="muted">${name}</span><span>${val}${tog}</span></div>`);
     }
     // controls
@@ -876,6 +890,7 @@ class HamletFarmPanel extends HTMLElement {
       ctl = `<div class="ctl">${b("on", onI, onL, !!isOn)}${b("off", offI, offL, so ? !isOn : false)}</div>
         ${so ? "" : `<div class="err">${esc(ent.control)} not found</div>`}`;
     }
+    if (!this._perm.control) ctl = "";
     // the mapped entities: tap one for Home Assistant's history graph
     const entRows = Object.entries(ent).map(([k, e]) => {
       const so = H.states[e];
@@ -889,8 +904,8 @@ class HamletFarmPanel extends HTMLElement {
       <div class="t"><b>${esc(p.name)}</b><span>${esc(TYPES[p.type]?.label || "")}</span></div>
       <a class="btn" href="${gmaps}" target="_blank" rel="noopener"><ha-icon icon="mdi:directions"></ha-icon>Directions</a>
       ${p.type === "eskom" ? `<a class="btn" href="tel:0860037566" title="Eskom contact centre 08600 37566 – have the account and pole number ready"><ha-icon icon="mdi:phone"></ha-icon>Report to Eskom</a>` : ""}
-      ${p.pump_entry ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pumps page</button>` : ""}
-      ${this._isAdmin ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+      ${p.pump_entry && this._perm.control ? `<button class="btn" data-act="openpump"><ha-icon icon="mdi:water-pump"></ha-icon>Pumps page</button>` : ""}
+      ${this._canEdit ? `<button class="btn" data-act="editpoint"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
     this._setHTML(this.$("pg-now"), `<h2>Now</h2>
         ${st.status ? `<span class="badge ${st.running ? "pulse" : ""}" style="--bc:${cls === "info" ? "var(--muted)" : color}"><span class="bd"></span>${esc(st.status)}</span>` : `<p class="note">Nothing linked yet${this._isAdmin ? " – tap Edit to link the pump, pivot or meter" : ""}.</p>`}
         ${v.pump_reason ? `<div class="reason">${esc(v.pump_reason)}</div>` : ""}
@@ -930,7 +945,7 @@ class HamletFarmPanel extends HTMLElement {
         <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
         <span class="dot" style="--mc:${esc(sh.color || STICKY_COLORS[0])};border:1px solid var(--line)"><ha-icon icon="mdi:note-text-outline" style="color:#333"></ha-icon></span>
         <div class="t"><b>${esc(sh.name)}</b><span>Sticky note${sh.hidden ? " · planning" : ""}</span></div>
-        ${this._isAdmin ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+        ${this._canEdit ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
       this._setHTML(this.$("pg-now"), `<div style="background:${esc(sh.color || STICKY_COLORS[0])};color:#222;border-radius:4px 4px 14px 4px;padding:14px 16px;white-space:pre-wrap;font-size:15px;box-shadow:1px 3px 8px rgba(0,0,0,.25)">${esc(sh.notes || "")}</div>
         <div class="kv" style="margin-top:10px"><span class="muted">GPS</span><span>${sh.coords[0][0].toFixed(6)}, ${sh.coords[0][1].toFixed(6)}</span></div>`);
       this._setHTML(this.$("pg-info"), ""); this.$("pg-info").hidden = true;
@@ -940,7 +955,7 @@ class HamletFarmPanel extends HTMLElement {
       <button class="btn" data-act="pageback"><ha-icon icon="mdi:arrow-left"></ha-icon>Map</button>
       <span class="dot" style="--mc:${color};border:1px solid var(--line)"><ha-icon icon="${closed ? "mdi:vector-square" : sh.kind === "sketch" ? "mdi:draw" : "mdi:vector-polyline"}" style="color:${color === "#ffffff" || color === "#ffcc00" ? "#333" : "#fff"}"></ha-icon></span>
       <div class="t"><b>${esc(sh.name)}</b><span>${esc(d.label)}</span></div>
-      ${this._isAdmin ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
+      ${this._canEdit ? `<button class="btn" data-act="editshape"><ha-icon icon="mdi:pencil"></ha-icon>Edit</button>` : ""}`);
     this._setHTML(this.$("pg-now"), `<h2>Size</h2>
       ${closed ? `<div class="kv"><span class="muted">Area</span><span>${fmtArea(areaM2(sh.coords))}</span></div>
         <div class="kv"><span class="muted">Distance round</span><span>${fmtDist(lineLength([...sh.coords, sh.coords[0]]))}</span></div>`
@@ -965,11 +980,11 @@ class HamletFarmPanel extends HTMLElement {
     el.innerHTML = `<div class="pgwrap"><div class="pghead" id="pg-head"></div>
       ${kind === "point" ? `<div class="htabs" role="tablist"><button role="tab" data-ptab="overview" aria-selected="true"><ha-icon icon="mdi:card-text-outline"></ha-icon>Overview</button>
         ${hasService(this._point(id)?.type) ? `<button role="tab" data-ptab="service" aria-selected="false"><ha-icon icon="mdi:wrench-outline"></ha-icon>Service</button>` : ""}
-        <button role="tab" data-ptab="history" aria-selected="false"><ha-icon icon="mdi:chart-line"></ha-icon>History</button></div>
+        ${this._hides("history") ? "" : `<button role="tab" data-ptab="history" aria-selected="false"><ha-icon icon="mdi:chart-line"></ha-icon>History</button>`}</div>
         <div id="pg-hist" hidden></div><div id="pg-svc" hidden></div>` : ""}
       <div class="pggrid" id="pg-grid"><div class="col"><section class="card" id="pg-now"></section><div id="pg-cards" class="pgcards"></div><div id="pg-pump"></div><section class="card" id="pg-info"></section><section class="card" id="pg-docs" hidden></section></div>
-        <div class="col"><section class="card" id="pg-log"><h2>Notes, photos &amp; files<span class="sub" id="pg-count"></span></h2>
-          <div class="composer"><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
+        <div class="col"><section class="card" id="pg-log" ${this._hides("log") ? "hidden" : ""}><h2>Notes, photos &amp; files<span class="sub" id="pg-count"></span></h2>
+          <div class="composer" ${this._perm.log ? "" : "hidden"}><textarea id="nt" maxlength="2000" placeholder="What you found, what you did, parts used…"></textarea>
             <div id="npv"></div><div id="nfv"></div>
             <div class="actions" style="margin-top:8px">
               <label class="btn"><input type="file" id="np" accept="image/*" hidden><ha-icon icon="mdi:camera"></ha-icon>Photo</label>
@@ -980,14 +995,14 @@ class HamletFarmPanel extends HTMLElement {
     el.hidden = false; el.scrollTop = 0;
     this._pumpCard = null;
     const t = this._pageTarget();
-    if (kind === "point" && t?.pump_entry) this._mountPumpCard(t.pump_entry);
+    if (kind === "point" && t?.pump_entry && this._perm.control) this._mountPumpCard(t.pump_entry);
     this._pageCards = [];
     if (kind === "point" && t?.cards?.trim()) this._mountCards(t.cards);
     this._renderPage();
     this._loadNotes();
   }
 
-  _refreshSvcTab() { const box = this.$("pg-svc"); const p = this._pageTarget(); if (box && !box.hidden && p && this._services) this._setHTML(box, serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id])); }
+  _refreshSvcTab() { const box = this.$("pg-svc"); const p = this._pageTarget(); if (box && !box.hidden && p && this._services) this._setHTML(box, serviceTabHtml(p, this._services, this._canSvc, this._snap.service?.[p.id])); }
 
   _renderHist() {
     const p = this._pageTarget(); if (!p || this._page?.kind !== "point") return;
@@ -1126,6 +1141,66 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   _openDoc(id) { this._docModal = { view: id }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); }
+  /* ------------------------------------------------------------ users & access (admin) */
+  async _openAccess() {
+    try {
+      const r = await this._hass.callWS({ type: `${DOMAIN}/access_get`, entry_id: this._entryId });
+      this._docModal = { access: { data: JSON.parse(JSON.stringify(r.access)), users: r.users } };
+      this.$("docmodal").hidden = false; this._renderDocModal();
+    } catch (e) { this._toast(e.message); }
+  }
+
+  _accessHtml() {
+    const a = this._docModal.access; const d = a.data;
+    const HIDE = [["electric", "Electrical", "Eskom points, transformers, solar, generators, cables, power lines"], ["water", "Water", "pumps, pivots, irrigation, tanks, valves, pipes"],
+      ["services", "Service reports", ""], ["prices", "Prices", "on service reports"], ["history", "History graphs", ""], ["log", "Site log", "notes, photos & files"]];
+    const ruleHtml = (key, r) => `
+      <div class="field"><label>Can</label><select data-acc="${esc(key)}" data-ak="role">
+        <option value="none" ${r.role === "none" ? "selected" : ""}>No access – the farm is hidden</option>
+        <option value="view" ${r.role === "view" ? "selected" : ""}>View the map</option>
+        <option value="edit" ${r.role === "edit" ? "selected" : ""}>View and edit the map (points, lines, notes)</option></select></div>
+      ${r.role === "none" ? "" : `<div class="users" style="margin:4px 0 2px">
+        <label><input type="checkbox" data-acc="${esc(key)}" data-ak="control" ${r.control ? "checked" : ""}>Switch pumps &amp; equipment from the map</label>
+        <label><input type="checkbox" data-acc="${esc(key)}" data-ak="log" ${r.log ? "checked" : ""}>Add notes, photos &amp; files to the site log</label>
+        <label><input type="checkbox" data-acc="${esc(key)}" data-ak="services_edit" ${r.services_edit ? "checked" : ""}>Write service reports (and see all of them)</label></div>
+        <div class="small muted" style="margin:6px 0 2px">Hide from them:</div>
+        <div class="chips">${HIDE.map(([k, l, h]) => `<label class="chip" title="${esc(h)}" style="display:inline-flex;gap:6px;align-items:center;padding:5px 10px;border:1px solid var(--line);border-radius:16px;font-size:13px;cursor:pointer">
+          <input type="checkbox" data-acc="${esc(key)}" data-ak="hide:${k}" ${(r.hide || []).includes(k) ? "checked" : ""}>${esc(l)}</label>`).join("")}</div>`}`;
+    const people = a.users.filter((u) => !u.admin);
+    return `<h2>Users &amp; access<span class="sub"><button class="iconbtn" data-act="docclose" aria-label="Close"><ha-icon icon="mdi:close"></ha-icon></button></span></h2>
+      <p class="small muted" style="margin:0 0 10px">Home Assistant <b>admins</b> can always see and change everything. Choose what everyone else may see and do on <b>${esc(this._snap?.name || "this farm")}</b>.
+        Quotes stay shared per document, and service reports per report.</p>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px"><b style="font-weight:500">Everyone else</b>
+        <div class="small muted">Users without their own rule below – and new users you add later</div>${ruleHtml("__default", d.default)}</div>
+      ${people.map((u) => { const own = d.users[u.id]; return `<div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px"><ha-icon icon="mdi:account-outline"></ha-icon><b style="font-weight:500;flex:1">${esc(u.name)}</b>
+          <label class="small" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" data-acc="${esc(u.id)}" data-ak="own" ${own ? "checked" : ""}>Own rule</label></div>
+        ${own ? ruleHtml(u.id, own) : `<div class="small muted" style="margin-top:4px">Same as everyone else</div>`}</div>`; }).join("") || `<div class="empty">No other users yet – add them under Settings → People in Home Assistant.</div>`}
+      ${a.users.filter((u) => u.admin).length ? `<div class="small muted" style="margin:6px 0">Admins (full access): ${a.users.filter((u) => u.admin).map((u) => esc(u.name)).join(", ")}</div>` : ""}
+      <div class="actions"><button class="btn primary" data-act="accsave">Save</button><button class="btn" data-act="docclose">Cancel</button></div><div class="err" id="accerr"></div>`;
+  }
+
+  _accInput(el) {
+    const d = this._docModal.access.data; const key = el.dataset.acc; const k = el.dataset.ak;
+    if (k === "own") {
+      if (el.checked) d.users[key] = JSON.parse(JSON.stringify(d.default)); else delete d.users[key];
+      this._renderDocModal(); return;
+    }
+    const r = key === "__default" ? d.default : d.users[key]; if (!r) return;
+    if (k === "role") { r.role = el.value; this._renderDocModal(); return; }
+    if (k.startsWith("hide:")) {
+      const h = k.slice(5); r.hide = (r.hide || []).filter((x) => x !== h); if (el.checked) r.hide.push(h); return;
+    }
+    r[k] = el.checked;
+  }
+
+  async _saveAccess() {
+    try {
+      await this._ws("access_save", { access: this._docModal.access.data });
+      this._closeDoc(); this._toast("Access saved – it applies straight away");
+    } catch (e) { const er = this.$("accerr"); if (er) er.textContent = e.message; }
+  }
+
   async _newDoc(point) {
     await this._docUsers();
     this._docModal = { form: { title: "", kind: "quote", amount: "", notes: "", point: point || "", users: [], file: null } };
@@ -1142,10 +1217,11 @@ class HamletFarmPanel extends HTMLElement {
   _renderDocModal() {
     const m = this._docModal; if (!m) return;
     const body = this.$("docbody");
+    if (m.access) { this._setHTML(body, this._accessHtml()); return; }
     if (m.svcForm) { this._setHTML(body, serviceFormHtml(m.svcForm, this._users || [], !m.svcForm.id)); return; }
     if (m.svcView) {
       const r = (this._services || []).find((x) => x.id === m.svcView); if (!r) { this._closeDoc(); return; }
-      this._setHTML(body, serviceViewHtml(r, this._point(r.point), this._isAdmin, this._users || [], this._confirm === `svc:${r.id}`)); return;
+      this._setHTML(body, serviceViewHtml(r, this._point(r.point), this._canSvc, this._users || [], this._confirm === `svc:${r.id}`)); return;
     }
     if (m.form) {
       const f = m.form;
@@ -1202,12 +1278,12 @@ class HamletFarmPanel extends HTMLElement {
   /* ------------------------------------------------------------ service reports */
   async _loadServices() {
     const p = this._pageTarget(); if (!p) return;
-    if (this._isAdmin) await this._docUsers();
+    if (this._canSvc) await this._docUsers();
     try {
       const r = await this._hass.callWS({ type: `${DOMAIN}/services`, entry_id: this._entryId, point: p.id });
       this._services = r.services;
     } catch (e) { this._services = []; }
-    const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id]);
+    const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._canSvc, this._snap.service?.[p.id]);
   }
 
   _readSvcForm() {
@@ -1227,7 +1303,7 @@ class HamletFarmPanel extends HTMLElement {
         report: { ...f, point: p.id, items: f.items.map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 })) } });
       this._services = r.services;
       this._docModal = { svcView: r.report.id }; this._renderDocModal();
-      const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._isAdmin, this._snap.service?.[p.id]);
+      const box = this.$("pg-svc"); if (box) box.innerHTML = serviceTabHtml(p, this._services, this._canSvc, this._snap.service?.[p.id]);
       this._toast("Service report saved");
     } catch (e) { this.$("derr").textContent = e.message || String(e); btn.disabled = false; }
   }
@@ -1550,7 +1626,7 @@ class HamletFarmPanel extends HTMLElement {
   _select(id) {
     if (this._measure) { const p = this._point(id); if (p) this._mapClick({ lat: p.lat, lng: p.lng }); return; }
     if (this._draw || this._placing || this._pen) return;
-    if (this._edit && this._isAdmin) { this._openEditor(id); return; }
+    if (this._edit && this._canEdit) { this._openEditor(id); return; }
     this._draft = null;
     this._openPage("point", id);
   }
@@ -1593,7 +1669,7 @@ class HamletFarmPanel extends HTMLElement {
 
   _shapeClick(id) {
     if (this._draw || this._placing || this._placingNote || this._measure || this._pen) return;
-    if (!this._edit || !this._isAdmin) { this._openPage("shape", id); return; }
+    if (!this._edit || !this._canEdit) { this._openPage("shape", id); return; }
     const s = this._snap.shapes.find((x) => x.id === id); if (!s) return;
     this._confirm = null;
     this._draft = { kind: "shape", id: s.id, shape_kind: s.kind, name: s.name, coords: s.coords, color: s.color, info: s.info, show_len: s.show_len, hidden: s.hidden, notes: s.notes };
@@ -1678,7 +1754,7 @@ class HamletFarmPanel extends HTMLElement {
       if (m) res.points.push({ p, st, ...m });
     }
     for (const sh of this._snap.shapes) {
-      if (!this._shapeVisible(sh) && !(this._isAdmin && sh.hidden)) continue;
+      if (!this._shapeVisible(sh) && !(this._canEdit && sh.hidden)) continue;
       const m = match([["", sh.name], ["", SHAPES[sh.kind]?.label], ["Details", sh.info], ["Note", sh.notes]]);
       if (m) res.shapes.push({ sh, ...m });
     }
@@ -1806,6 +1882,7 @@ class HamletFarmPanel extends HTMLElement {
 
   _input(ev) {
     const el = ev.composedPath()[0];
+    if (el?.dataset?.acc && ev.type === "change" && this._docModal?.access) { this._accInput(el); return; }
     if (el?.id === "offfile" && ev.type === "change" && el.files?.[0]) { this._offOpen(el.files[0]); return; }
     if (el?.id === "np" && ev.type === "change" && el.files?.[0]) { this._notePhotoPicked(el.files[0]); el.value = ""; return; }
     if (el?.id === "nf" && ev.type === "change" && el.files?.[0]) {
@@ -1894,6 +1971,7 @@ class HamletFarmPanel extends HTMLElement {
       try { await this._ws("offline_delete", { layer_id: ds.offdel }); this._toast("Photo deleted"); } catch (e) { this._toast(e.message); }
       return;
     }
+    if ((ds.toggle || ds.ctl || ds.pmode) && !this._perm.control) return;
     if (ds.toggle) { this._hass.callService("homeassistant", "toggle", { entity_id: ds.toggle }); return; }
     if (ds.pmode) {
       const p = this._point(this._sel);
@@ -2012,6 +2090,8 @@ class HamletFarmPanel extends HTMLElement {
         break;
       }
       case "docnew": this._newDoc(ds.docpoint); break;
+      case "access": this._openAccess(); break;
+      case "accsave": this._saveAccess(); break;
       case "docclose": this._closeDoc(); break;
       case "docsave": this._saveDoc(); break;
       case "docedit": this._editDoc(this._docModal.view); break;

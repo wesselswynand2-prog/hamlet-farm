@@ -397,3 +397,52 @@ async def test_service_reports(hass: HomeAssistant, hass_ws_client, hass_read_on
     assert (await _reply(ro, 2))["error"]["code"] == "unauthorized"
     await ws.send_json({"id": 6, "type": f"{DOMAIN}/service_delete", "entry_id": entry.entry_id, "report_id": rid})
     assert (await _reply(ws, 6))["success"]
+
+
+async def test_users_and_access(hass: HomeAssistant, hass_ws_client, hass_read_only_access_token, hass_read_only_user):
+    entry = await _setup(hass)
+    eid = entry.entry_id
+    ws = await hass_ws_client(hass)
+    for i, (t, name) in enumerate((("eskom", "Main Eskom"), ("pump", "Borehole 1"), ("gate", "Front gate"))):
+        await ws.send_json({"id": 10 + i, "type": f"{DOMAIN}/save_point", "entry_id": eid,
+                            "point": {"name": name, "type": t, "lat": -25.7 + i / 1000, "lng": 28.2}})
+        assert (await _reply(ws, 10 + i))["success"]
+    await ws.send_json({"id": 20, "type": f"{DOMAIN}/save_shape", "entry_id": eid,
+                        "shape": {"kind": "cable", "coords": [[-25.7, 28.2], [-25.71, 28.21]]}})
+    assert (await _reply(ws, 20))["success"]
+    await ws.send_json({"id": 21, "type": f"{DOMAIN}/access_get", "entry_id": eid})
+    r = (await _reply(ws, 21))["result"]
+    assert r["access"]["default"]["role"] == "view" and any(u["id"] == hass_read_only_user.id for u in r["users"])
+
+    ro = await hass_ws_client(hass, hass_read_only_access_token)
+    # admin-only screens stay admin-only
+    await ro.send_json({"id": 1, "type": f"{DOMAIN}/access_get", "entry_id": eid})
+    assert not (await _reply(ro, 1))["success"]
+    await ro.send_json({"id": 2, "type": f"{DOMAIN}/access_save", "entry_id": eid, "access": {"default": {"role": "edit"}}})
+    assert (await _reply(ro, 2))["error"]["code"] == "unauthorized"
+
+    # 1. this user may edit the map, but not see electrical things or the site log
+    rule = {"role": "edit", "hide": ["electric", "log"], "control": False}
+    await ws.send_json({"id": 22, "type": f"{DOMAIN}/access_save", "entry_id": eid, "access": {"users": {hass_read_only_user.id: rule}}})
+    assert (await _reply(ws, 22))["success"]
+    await ro.send_json({"id": 3, "type": f"{DOMAIN}/state", "entry_id": eid})
+    s = (await _reply(ro, 3))["result"]
+    assert sorted(p["name"] for p in s["points"]) == ["Borehole 1", "Front gate"] and s["shapes"] == []
+    assert s["perms"]["role"] == "edit" and s["perms"]["control"] is False and s["perms"]["log"] is False
+    await ro.send_json({"id": 4, "type": f"{DOMAIN}/save_point", "entry_id": eid, "point": {"name": "Tank", "type": "tank", "lat": -25.8, "lng": 28.3}})
+    r = await _reply(ro, 4)
+    assert r["success"] and len(r["result"]["points"]) == 3          # reply only has what they may see
+    await ro.send_json({"id": 5, "type": f"{DOMAIN}/note_add", "entry_id": eid, "target": s["points"][0]["id"], "text": "hi"})
+    assert (await _reply(ro, 5))["error"]["code"] == "unauthorized"
+    await ro.send_json({"id": 6, "type": f"{DOMAIN}/save_settings", "entry_id": eid, "settings": {"alert_delay_s": 60}})
+    assert (await _reply(ro, 6))["error"]["code"] == "unauthorized"
+
+    # 2. everyone else: no access at all
+    await ws.send_json({"id": 23, "type": f"{DOMAIN}/access_save", "entry_id": eid, "access": {"default": {"role": "none"}}})
+    assert (await _reply(ws, 23))["success"]
+    await ro.send_json({"id": 7, "type": f"{DOMAIN}/list"})
+    assert (await _reply(ro, 7))["result"] == []
+    await ro.send_json({"id": 8, "type": f"{DOMAIN}/state", "entry_id": eid})
+    assert (await _reply(ro, 8))["error"]["code"] == "unauthorized"
+    await ws.send_json({"id": 24, "type": f"{DOMAIN}/list"})
+    assert len((await _reply(ws, 24))["result"]) == 1               # admins always see it
