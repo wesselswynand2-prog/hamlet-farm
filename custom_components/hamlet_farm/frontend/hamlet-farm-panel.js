@@ -902,7 +902,11 @@ class HamletFarmPanel extends HTMLElement {
     const H = this._hass;
     const rows = [];
     const kv = (k, val) => rows.push(`<div class="kv"><span class="muted">${k}</span><span>${val}</span></div>`);
-    if (v.power_w !== undefined) kv("Power", fmtW(v.power_w));
+    if (v.power_w !== undefined) kv(p.type === "solar" ? "Solar (PV)" : "Power", fmtW(v.power_w));
+    if (v.battery !== undefined) kv("Battery", `${v.battery}%${v.battery_power_w !== undefined ? ` · ${v.battery_power_w > 50 ? `charging ${fmtW(v.battery_power_w)}` : v.battery_power_w < -50 ? `discharging ${fmtW(-v.battery_power_w)}` : "idle"}` : ""}`);
+    else if (v.battery_power_w !== undefined) kv("Battery", v.battery_power_w > 50 ? `charging ${fmtW(v.battery_power_w)}` : v.battery_power_w < -50 ? `discharging ${fmtW(-v.battery_power_w)}` : "idle");
+    if (v.grid_power_w !== undefined) kv("Grid (Eskom)", v.grid_power_w > 50 ? `importing ${fmtW(v.grid_power_w)}` : v.grid_power_w < -50 ? `exporting ${fmtW(-v.grid_power_w)}` : "none");
+    if (v.load_power_w !== undefined) kv("House / load", fmtW(v.load_power_w));
     if (v.energy_today_kwh !== undefined) kv("Used today", fmtKwh(v.energy_today_kwh));
     if (v.energy_month_kwh !== undefined) kv("Used this month", fmtKwh(v.energy_month_kwh));
     if (v.energy_kwh !== undefined) kv("Meter reading", `${Math.round(v.energy_kwh).toLocaleString()} kWh`);
@@ -1198,6 +1202,36 @@ class HamletFarmPanel extends HTMLElement {
   }
 
   _openDoc(id) { this._docModal = { view: id }; this._confirm = null; this.$("docmodal").hidden = false; this._renderDocModal(); }
+  /** Fill a solar point from the Sigenergy integration (TypQxQ "Sigenergy ESS", platform "sigen") or sigenergy2mqtt. */
+  _findSigen() {
+    const d = this._draft; if (!d) return;
+    this._readForm();
+    const H = this._hass; const reg = H.entities || {};
+    const ids = Object.keys(H.states).filter((e) => e.startsWith("sensor.") && (reg[e]?.platform === "sigen" || /sigen/i.test(e)));
+    if (!ids.length) { this._toast("No Sigenergy sensors found – install the Sigenergy ESS integration (HACS) first"); return; }
+    const pick = (...pats) => {
+      for (const re of pats) {
+        const hit = ids.filter((e) => re.test(e)).sort((a, b) => (/plant/.test(b) - /plant/.test(a)) || a.length - b.length)[0];
+        if (hit) return hit;
+      }
+      return "";
+    };
+    const map = {
+      power: pick(/plant_pv_power$/, /plant.*photovoltaic_power$/, /_pv_power$/, /photovoltaic_power$/),
+      energy: pick(/plant_total_pv_generation$/, /plant_accumulated_pv_energy$/, /total_pv_generation$/),   // a running total (the app works out today / this month)
+      battery: pick(/plant_battery_state_of_charge$/, /plant.*(ess_)?soc$/, /battery_state_of_charge$/, /_soc$/),
+      battery_power: pick(/plant_battery_power$/, /plant.*ess_power$/, /battery_power$/),
+      grid_power: pick(/plant_grid_active_power$/, /plant_grid_sensor_active_power$/, /grid_active_power$/),
+      load_power: pick(/plant_consumed_power$/, /consumed_power$/, /load_power$/),
+    };
+    let n = 0;
+    for (const [k, e] of Object.entries(map)) if (e) { d.entities[k] = e; n++; }
+    if (!d.name) d.name = "Sigenergy";
+    if (!d.icon) d.icon = "mdi:home-battery";
+    this._renderSide(); this._fm.update(this._mapPreview());
+    this._toast(n ? `Found ${n} Sigenergy sensors – check them and Save` : "Sigenergy found, but not the usual sensors – pick them below");
+  }
+
   /* ------------------------------------------------------------ users & access (admin) */
   async _openAccess() {
     try {
@@ -1529,7 +1563,7 @@ class HamletFarmPanel extends HTMLElement {
       const r = ROLES[k]; const val = d.entities[k] || "";
       const so = val ? H.states[val] : null;
       const now = val ? (so ? `${so.state}${so.attributes.unit_of_measurement ? " " + so.attributes.unit_of_measurement : ""}` : "not found") : "";
-      return `<div class="field"><label for="e_${k}">${r.label}</label>${r.hint ? `<span class="hint">${r.hint}</span>` : ""}
+      return `<div class="field"><label for="e_${k}">${t.labels?.[k] || r.label}</label>${r.hint ? `<span class="hint">${r.hint}</span>` : ""}
         <div class="ent"><input type="text" id="e_${k}" data-role="${k}" value="${esc(val)}" list="dl-${k}" placeholder="${r.domains[0]}.…" autocomplete="off" spellcheck="false">
         <span class="now ${so || !val ? "" : "bad"}" title="${esc(now)}">${esc(now)}</span></div></div>`;
     };
@@ -1581,6 +1615,7 @@ class HamletFarmPanel extends HTMLElement {
           <datalist id="dl-volt">${["230 V", "400 V", "1000 V", "11 kV", "22 kV", "33 kV"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>
           <datalist id="dl-tariff">${["Landrate", "Landlight", "Ruraflex", "Nightsave Rural", "Homepower", "Homeflex", "Businessrate", "Miniflex", "Nightsave Urban", "Megaflex"].map((v) => `<option value="${v}"></option>`).join("")}</datalist>` : ""}
           ${d.type === "pivot" ? `<div class="field inline"><label for="f_radius">Pivot radius<span class="hint" style="display:block">Centre to the last tower – draws the circle</span></label><span class="small muted"><input type="number" id="f_radius" data-f="radius" min="0" max="3000" value="${esc(d.radius)}"> m</span></div>` : ""}
+          ${d.type === "solar" ? `<div class="field inline"><span class="small muted">Sigenergy, Victron, Sunsynk, Deye… pick its sensors below.</span><button class="btn" data-act="findsigen"><ha-icon icon="mdi:auto-fix"></ha-icon>Find Sigenergy</button></div>` : ""}
           ${main.map(roleField).join("")}
         </div>
         ${installFieldsHtml(d)}
@@ -1589,6 +1624,7 @@ class HamletFarmPanel extends HTMLElement {
           <div class="field"><label for="f_extra">Also show</label><span class="hint">Any other entities, one per line – cameras show a picture, switches get a button</span>
             <textarea id="f_extra" data-f="extra" rows="2" spellcheck="false" placeholder="camera.borehole&#10;sensor.dam_temperature">${esc(d.extra.join("\n"))}</textarea>
             <input type="text" id="f_extra_add" list="dl-extra" placeholder="Search to add…" autocomplete="off"></div>
+          ${d.type === "solar" || d.entities.battery ? `<div class="field inline"><label for="f_batlow">Battery low alert below<span class="hint" style="display:block">0 = off</span></label><span class="small muted"><input type="number" id="f_batlow" data-f="battery_low" min="0" max="100" value="${esc(d.battery_low ?? 0)}"> %</span></div>` : ""}
           ${["tank", "pump", "other"].includes(d.type) || d.entities.level ? `<div class="field inline"><label for="f_low">Low level alert below</label><span class="small muted"><input type="number" id="f_low" data-f="low_level" min="0" max="100" value="${esc(d.low_level)}"> %</span></div>` : ""}
           ${d.entities.temperature || ["probe", "weather"].includes(d.type) ? `<div class="field inline"><label for="f_tlow">Temperature alert<span class="hint" style="display:block">Leave empty for no alert – e.g. below 2 °C for frost</span></label><span class="small muted">below <input type="number" id="f_tlow" data-f="temp_low" step="0.5" style="width:64px" value="${esc(d.temp_low ?? "")}"> above <input type="number" id="f_thigh" data-f="temp_high" step="0.5" style="width:64px" value="${esc(d.temp_high ?? "")}"> °C</span></div>` : ""}
           <div class="field inline"><label for="f_alert">Alert when this point has a problem<span class="hint" style="display:block">Fault, no power, offline, low level, temperature</span></label>
@@ -1929,7 +1965,7 @@ class HamletFarmPanel extends HTMLElement {
       const f = el.dataset.f;
       if (f === "alert") d.alert = el.checked;
       else if (f === "extra") d.extra = el.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-      else if (f === "radius" || f === "low_level") d[f] = Number(el.value) || 0;
+      else if (f === "radius" || f === "low_level" || f === "battery_low") d[f] = Number(el.value) || 0;
       else if (f === "temp_low" || f === "temp_high") d[f] = el.value === "" || isNaN(Number(el.value)) ? null : Number(el.value);
       else if (f === "pump_entry") d.pump_entry = el.value || null;
       else if (f === "cards") d.cards = el.value;
@@ -2148,6 +2184,7 @@ class HamletFarmPanel extends HTMLElement {
       }
       case "docnew": this._newDoc(ds.docpoint); break;
       case "access": this._openAccess(); break;
+      case "findsigen": this._findSigen(); break;
       case "online": {
         if (this._page) this._closePage();
         this._draft = null; this._sel = null; this._renderSide();

@@ -221,3 +221,16 @@ def test_watering_zones_on_land():
 
 def test_irrigation_specs():
     assert pt(type="irrigation", specs={"motor_kw": 2.2, "pressure_set": "PID 3 bar", "depth": 80})["specs"] == {"motor_kw": 2.2, "pressure_set": "PID 3 bar"}
+
+
+def test_solar_battery_system():
+    p = logic.clean_point({"name": "Sigenergy", "type": "solar", "lat": -25.1, "lng": 28.2, "battery_low": "25",
+                           "entities": {"power": "sensor.pv", "battery": "sensor.soc", "battery_power": "sensor.bat", "grid_power": "sensor.grid", "load_power": "sensor.load"}})
+    vals = {"sensor.pv": ("6.24", "kW"), "sensor.soc": ("78", "%"), "sensor.bat": ("2.1", "kW"), "sensor.grid": ("-1.5", "kW"), "sensor.load": ("2.6", "kW")}
+    rd = lambda v: (lambda e: logic.Reading(*v[e]) if e in v else None)
+    st = logic.point_status(p, rd(vals))
+    assert st["status"] == "PV 6.2 kW · Battery 78% ↑" and st["cls"] == "run"
+    assert st["values"]["battery_power_w"] == 2100 and st["values"]["grid_power_w"] == -1500 and st["values"]["load_power_w"] == 2600
+    night = {**vals, "sensor.pv": ("0", "kW"), "sensor.soc": ("20", "%"), "sensor.bat": ("-1.8", "kW")}
+    st = logic.point_status(p, rd(night))
+    assert st["status"] == "Battery low · 20%" and st["cls"] == "warn"

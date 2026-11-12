@@ -34,7 +34,8 @@ SKETCH_COLORS = ("#ff3b30", "#ffcc00", "#ffffff", "#34c759", "#0a84ff", "#ff9500
 STICKY_COLORS = ("#fff176", "#ffcc80", "#f48fb1", "#a5d6a7", "#90caf9", "#ce93d8", "#ffffff")
 
 # entity roles a point can have
-ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle", "temperature", "humidity"]
+ENTITY_KEYS = ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "angle", "temperature", "humidity",
+               "battery", "battery_power", "grid_power", "load_power"]
 CORE_KEYS = ["control", "running", "power", "supply", "level", "angle"]   # unavailable -> point offline
 MAX_EXTRA = 8
 MAX_ZONES = 16
@@ -125,6 +126,7 @@ def clean_point(raw: dict) -> dict:
         "zones": zones,
         "radius": round(_float(raw.get("radius"), 0, 3000, 0) or 0),
         "low_level": _float(raw.get("low_level"), 0, 100, 20),
+        "battery_low": _float(raw.get("battery_low"), 0, 100, 0),
         "temp_high": _float(raw.get("temp_high"), -60, 200) if raw.get("temp_high") not in (None, "") else None,
         "temp_low": _float(raw.get("temp_low"), -60, 200) if raw.get("temp_low") not in (None, "") else None,
         "alert": bool(raw.get("alert", True)),
@@ -333,6 +335,12 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         values["temp"] = round(n, 1)
     if (rd := r.get("humidity")) is not None and (n := to_num(rd.state)) is not None:
         values["humidity"] = round(n)
+    # solar / battery systems (Sigenergy, Victron, Sunsynk, …): PV in "power"
+    if (bat := percent(r.get("battery"))) is not None:
+        values["battery"] = round(bat)
+    for k in ("battery_power", "grid_power", "load_power"):   # battery: + charging, grid: + importing
+        if (v := watts(r.get(k))) is not None:
+            values[f"{k}_w"] = round(v, 1)
     if (rd := r.get("angle")) is not None and (n := to_num(rd.state)) is not None:
         values["angle"] = round(n % 360, 1)
     if (rd := r.get("supply")) is not None and (n := to_num(rd.state)) is not None and (rd.unit == "V" or n > 1):
@@ -439,6 +447,19 @@ def point_status(point: dict, read: Callable[[str], Reading | None], pump: dict 
         return out(f"Hot · {t:.1f} °C", "warn")
     if t is not None and point.get("temp_low") is not None and t < point["temp_low"]:
         return out(f"Cold · {t:.1f} °C", "warn")
+
+    # 6d. solar / battery system
+    if point.get("type") == "solar" and (w is not None or "battery" in values):
+        bat = values.get("battery")
+        if bat is not None and point.get("battery_low") and bat < point["battery_low"]:
+            return out(f"Battery low · {bat}%", "warn", False)
+        parts = []
+        if w is not None:
+            parts.append(f"PV {w / 1000:.1f} kW")
+        if bat is not None:
+            bp = values.get("battery_power_w")
+            parts.append(f"Battery {bat}%" + (" ↑" if bp and bp > 50 else " ↓" if bp and bp < -50 else ""))
+        return out(" · ".join(parts), "run" if (w or 0) >= 50 else "on", (w or 0) >= 50)
 
     # 7. running / on / off
     if running:

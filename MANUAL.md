@@ -157,6 +157,14 @@ Tap a line in Edit to rename it, change its type, write **Notes** (pipe size, de
 - **Delete one drawing or line:** Edit → tap it → **Delete** (twice).
 - **Delete all drawings:** **Layers → Delete all drawings** (twice). Pipes, cables and other lines stay.
 
+## Solar & batteries (Sigenergy) (admin)
+
+1. Get the system into Home Assistant first – for **Sigenergy**: HACS → *Sigenergy ESS* integration (local Modbus-TCP; the installer must switch Modbus-TCP on in the Sigenergy system).
+2. **Edit → Point → Solar / inverter**, place it, then tap **Find Sigenergy** – it fills in solar power, total PV energy, battery %, battery power, grid power and house load. Check them and **Save**.
+3. Other brands (Victron, Sunsynk, Deye…): pick the same sensors by hand. Battery power: + = charging. Grid power: + = importing from Eskom.
+
+The map shows e.g. *6.2 kW · 🔋78%*, the marker has a turning sun while the panels produce, and the page shows charging / discharging and importing / exporting. **Battery low alert below** (e.g. 25 %) turns it orange and, with alerts on, sends a notification.
+
 ## Temperature probes (admin)
 
 - **Edit → Point → Temperature probe**, place it where the probe is, and pick its **Temperature** sensor (and **Humidity** if it has one). The map shows e.g. *18.4 °C · 64%* under the name.

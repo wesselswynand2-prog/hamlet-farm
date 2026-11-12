@@ -113,6 +113,7 @@ Who can see what: only the users you ticked, plus **every admin** of that Home A
 ## Layers, planning lines and deleting drawings
 
 - **Layers** button (top right of the map): tick what to show – names, drawings, water pipes, cables, overhead lines, fences, roads, land, the offline photo. Remembered per phone / PC.
+- **Solar & batteries**: a *Solar / inverter* point shows PV power, battery % (charging / discharging), grid import / export and house load. **Find Sigenergy** fills it in from the Sigenergy ESS integration; works with any brand.
 - **Temperature probes**: a *Temperature probe* point (or the Temperature field on any point) shows °C and humidity on the map, with optional frost / high temperature alerts.
 - **Who is on the app** (admin): who has the farm map open right now and what they're busy with – so you know when it's safe to restart for an update.
 - **Users & access** (admin): per farm and per user – no access / view / edit the map, switch pumps, add to the site log, write service reports, and hide electrical, water, service reports, prices, history or the site log.

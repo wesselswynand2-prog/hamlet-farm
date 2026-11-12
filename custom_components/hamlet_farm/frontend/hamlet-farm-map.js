@@ -15,7 +15,8 @@ export const TYPES = {
   camera: { label: "Camera", icon: "mdi:cctv", roles: [] },
   weather: { label: "Weather station", icon: "mdi:weather-partly-rainy", roles: ["temperature", "humidity"] },
   probe: { label: "Temperature probe", icon: "mdi:thermometer", roles: ["temperature", "humidity"] },
-  solar: { label: "Solar / inverter", icon: "mdi:solar-power-variant", roles: ["power", "energy", "supply", "fault"] },
+  solar: { label: "Solar / inverter", icon: "mdi:solar-power-variant", roles: ["power", "energy", "battery", "battery_power", "grid_power", "load_power", "supply", "fault"],
+    labels: { power: "Solar (PV) power", energy: "Solar energy (kWh)" } },
   generator: { label: "Generator", icon: "mdi:engine", roles: ["control", "running", "power", "fault", "temperature"] },
   building: { label: "Building", icon: "mdi:home-outline", roles: ["power", "energy", "control", "temperature"] },
   other: { label: "Other", icon: "mdi:map-marker", roles: ["control", "running", "power", "energy", "supply", "fault", "level", "pressure", "flow", "temperature", "humidity"] },
@@ -33,6 +34,10 @@ export const ROLES = {
   angle: { label: "Pivot position (°)", hint: "0° = north, clockwise – draws the pivot arm", domains: ["sensor", "number", "input_number"] },
   temperature: { label: "Temperature (°C)", hint: "Outside probe, motor / panel / transformer temperature – shown on the map", domains: ["sensor", "number", "input_number"] },
   humidity: { label: "Humidity (%)", hint: "", domains: ["sensor", "number"] },
+  battery: { label: "Battery charge (%)", hint: "State of charge", domains: ["sensor", "number"] },
+  battery_power: { label: "Battery power", hint: "+ charging / − discharging", domains: ["sensor"] },
+  grid_power: { label: "Grid power", hint: "+ importing from Eskom / − exporting", domains: ["sensor"] },
+  load_power: { label: "House / load power", hint: "What's being used", domains: ["sensor"] },
 };
 export const SHAPES = {
   pipe: { label: "Water pipe", color: "#5aaeff", weight: 3, dash: null },
@@ -108,6 +113,8 @@ export function shortValue(p, st) {
   }
   if ((p.type === "probe" || p.type === "weather") && v.temp !== undefined) return `${v.temp.toFixed(1)} °C${v.humidity !== undefined ? ` · ${v.humidity}%` : ""}`;
   if (p.type === "pivot" && v.angle !== undefined) return `${Math.round(v.angle)}°`;
+  if (p.type === "solar" && (v.power_w !== undefined || v.battery !== undefined))
+    return [v.power_w !== undefined ? fmtW(v.power_w) : "", v.battery !== undefined ? `🔋${v.battery}%` : ""].filter(Boolean).join(" · ");
   if (p.type === "irrigation" && v.zones) { const i = v.zones.findIndex((z) => z.open); if (i >= 0) return `Zone ${i + 1} watering`; }
   if (v.level !== undefined && (p.type === "tank" || p.type === "pump")) return `${Math.round(v.level)}%`;
   if (v.power_w !== undefined && (st?.running || p.type === "eskom" || p.type === "solar")) return fmtW(v.power_w);
@@ -164,6 +171,10 @@ export const MAP_CSS = `
 .hf-mk.zap ha-icon { animation: hf-flick 2.6s steps(1) infinite; }
 @keyframes hf-zap { 0%, 100% { opacity: .25; transform: scale(.9); } 45% { opacity: .9; transform: scale(1.05); } 50% { opacity: .3; } 55% { opacity: 1; transform: scale(1.1); } }
 @keyframes hf-flick { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 3px #ffd600) brightness(1.4); } 54% { filter: none; } 56% { filter: drop-shadow(0 0 4px #ffd600) brightness(1.5); } }
+.hf-sun { position: absolute; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255,200,0,.95) 0 10deg, transparent 10deg 30deg);
+  -webkit-mask: radial-gradient(circle, transparent 19px, #000 20px, #000 25px, transparent 26px); mask: radial-gradient(circle, transparent 19px, #000 20px, #000 25px, transparent 26px);
+  animation: hf-spin 9s linear infinite; }
 .hf-noanim .hf-anim { display: none; }
 .hf-noanim .hf-mk.zap ha-icon { animation: none; }
 @media (prefers-reduced-motion: reduce) { .hf-mk.run::after { animation: none; opacity: .6; } .hf-anim { display: none; } .hf-mk.zap ha-icon { animation: none; } }
@@ -290,9 +301,10 @@ export class FarmMap {
     const on = cls === "run" || (cls === "on" && (t === "eskom" || t === "transformer"));
     const anim = !on ? "" : ["pump", "booster", "irrigation"].includes(t) ? `<div class="hf-anim"><i class="hf-drop"></i><i class="hf-drop"></i><i class="hf-drop"></i><i class="hf-drop"></i></div>`
       : t === "pivot" ? `<div class="hf-anim"><i class="hf-spin"></i></div>`
+      : t === "solar" ? `<div class="hf-anim"><i class="hf-sun"></i></div>`
       : t === "eskom" || t === "transformer" ? `<div class="hf-anim"><i class="hf-zap"></i></div>` : "";
     const zap = anim && (t === "eskom" || t === "transformer") ? " zap" : "";
-    return `${anim.includes("hf-zap") || anim.includes("hf-spin") ? anim : ""}<div class="hf-mk ${custom ? `custom${cls === "run" ? " run" : ""}` : cls}${zap}" style="--mc:${col};${custom ? `color:${inkOn(col)}` : ""}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></div>${anim.includes("hf-drop") ? anim : ""}
+    return `${anim.includes("hf-zap") || anim.includes("hf-spin") || anim.includes("hf-sun") ? anim : ""}<div class="hf-mk ${custom ? `custom${cls === "run" ? " run" : ""}` : cls}${zap}" style="--mc:${col};${custom ? `color:${inkOn(col)}` : ""}"><ha-icon icon="${esc(pointIcon(p))}"></ha-icon></div>${anim.includes("hf-drop") ? anim : ""}
       <div class="hf-lbl">${esc(p.name)}${val ? `<small>${esc(val)}</small>` : ""}</div>`;
   }
 
